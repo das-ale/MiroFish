@@ -77,6 +77,22 @@
             </div>
           </div>
 
+          <!-- Entidades excluidas por el filtro de actores -->
+          <div v-if="excludedEntities.length > 0" class="excluded-panel">
+            <div class="excluded-header" @click="showExcluded = !showExcluded">
+              <span class="excluded-title">⚠ {{ $t('step2.excludedEntitiesTitle', { count: excludedEntities.length }) }}</span>
+              <span class="excluded-toggle">{{ showExcluded ? '▾' : '▸' }}</span>
+            </div>
+            <div v-show="showExcluded" class="excluded-body">
+              <p class="excluded-desc">{{ $t('step2.excludedEntitiesDesc') }}</p>
+              <div v-for="e in excludedEntities" :key="e.name" class="excluded-item">
+                <span class="excluded-name">{{ e.name }}</span>
+                <span class="excluded-reason">{{ $t('step2.excludedReason_' + e.reason) }}</span>
+                <p v-if="e.why" class="excluded-why">{{ e.why }}</p>
+              </div>
+            </div>
+          </div>
+
           <!-- Profiles List Preview -->
           <div v-if="profiles.length > 0" class="profiles-preview">
             <div class="preview-header">
@@ -660,6 +676,8 @@ const prepareProgress = ref(0)
 const currentStage = ref('')
 const progressMessage = ref('')
 const profiles = ref([])
+const excludedEntities = ref([])
+const showExcluded = ref(false)
 const entityTypes = ref([])
 const expectedTotal = ref(null)
 const simulationConfig = ref(null)
@@ -914,9 +932,20 @@ const pollPrepareStatus = async () => {
   }
 }
 
+const fetchExcludedEntities = async () => {
+  if (!props.simulationId || excludedEntities.value.length > 0) return
+  try {
+    const res = await getSimulation(props.simulationId)
+    if (res.success && res.data?.excluded_entities?.length) {
+      excludedEntities.value = res.data.excluded_entities
+    }
+  } catch (e) { /* opcional: sin excluidas */ }
+}
+
 const fetchProfilesRealtime = async () => {
   if (!props.simulationId) return
-  
+  fetchExcludedEntities()
+
   try {
     const res = await getSimulationProfilesRealtime(props.simulationId)
     
@@ -2620,4 +2649,38 @@ onUnmounted(() => {
   transform: scale(0.95) translateY(10px);
   opacity: 0;
 }
+
+.excluded-panel {
+  margin: 12px 0;
+  border: 1px solid rgba(230, 162, 60, 0.4);
+  border-radius: 8px;
+  background: rgba(230, 162, 60, 0.06);
+}
+.excluded-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.excluded-title { font-size: 13px; font-weight: 600; color: #b8863b; }
+.excluded-toggle { color: #b8863b; }
+.excluded-body { padding: 0 14px 12px; }
+.excluded-desc { font-size: 12px; opacity: 0.75; margin: 0 0 8px; }
+.excluded-item {
+  padding: 6px 0;
+  border-top: 1px dashed rgba(230, 162, 60, 0.25);
+  font-size: 12px;
+}
+.excluded-name { font-weight: 600; margin-right: 8px; }
+.excluded-reason {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: rgba(230, 162, 60, 0.18);
+  color: #b8863b;
+  font-size: 11px;
+}
+.excluded-why { margin: 3px 0 0; opacity: 0.7; }
 </style>

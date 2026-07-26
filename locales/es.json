@@ -75,7 +75,13 @@
     "layoutGraph": "Grafo",
     "layoutSplit": "Dividido",
     "layoutWorkbench": "Mesa de trabajo",
-    "stepNames": ["Construcción del grafo", "Configuración del entorno", "Ejecutar simulación", "Generación del informe", "Interacción profunda"]
+    "stepNames": [
+      "Construcción del grafo",
+      "Configuración del entorno",
+      "Ejecutar simulación",
+      "Generación del informe",
+      "Interacción profunda"
+    ]
   },
   "step1": {
     "ontologyGeneration": "Generación de ontología",
@@ -174,7 +180,12 @@
     "genderOther": "Otro",
     "yearsOld": "años",
     "initializing": "Inicializando",
-    "generating": "Generando"
+    "generating": "Generando",
+    "excludedEntitiesTitle": "{count} entidades excluidas del reparto",
+    "excludedEntitiesDesc": "El filtro de actores las apartó porque no son participantes plausibles de la conversación. Si alguna debería participar, desactiva el filtro con PROFILE_ENTITY_FILTER=0 y regenera.",
+    "excludedReason_platform_or_tool": "plataforma/herramienta",
+    "excludedReason_referenced_person": "persona solo citada",
+    "excludedReason_abstract_concept": "concepto abstracto"
   },
   "step3": {
     "startGenerateReport": "Generar informe",

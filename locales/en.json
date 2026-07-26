@@ -75,7 +75,13 @@
     "layoutGraph": "Graph",
     "layoutSplit": "Split",
     "layoutWorkbench": "Workbench",
-    "stepNames": ["Graph Build", "Env Setup", "Run Simulation", "Report Generation", "Deep Interaction"]
+    "stepNames": [
+      "Graph Build",
+      "Env Setup",
+      "Run Simulation",
+      "Report Generation",
+      "Deep Interaction"
+    ]
   },
   "step1": {
     "ontologyGeneration": "Ontology Generation",
@@ -174,7 +180,12 @@
     "genderOther": "Other",
     "yearsOld": "years old",
     "initializing": "Initializing",
-    "generating": "Generating"
+    "generating": "Generating",
+    "excludedEntitiesTitle": "{count} entities excluded from the cast",
+    "excludedEntitiesDesc": "The actor filter removed them because they are not plausible participants of the conversation. If one should participate, disable the filter with PROFILE_ENTITY_FILTER=0 and regenerate.",
+    "excludedReason_platform_or_tool": "platform/tool",
+    "excludedReason_referenced_person": "referenced person",
+    "excludedReason_abstract_concept": "abstract concept"
   },
   "step3": {
     "startGenerateReport": "Generate Report",

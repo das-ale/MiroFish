@@ -75,7 +75,13 @@
     "layoutGraph": "图谱",
     "layoutSplit": "双栏",
     "layoutWorkbench": "工作台",
-    "stepNames": ["图谱构建", "环境搭建", "开始模拟", "报告生成", "深度互动"]
+    "stepNames": [
+      "图谱构建",
+      "环境搭建",
+      "开始模拟",
+      "报告生成",
+      "深度互动"
+    ]
   },
   "step1": {
     "ontologyGeneration": "本体生成",
@@ -174,7 +180,12 @@
     "genderOther": "其他",
     "yearsOld": "岁",
     "initializing": "初始化",
-    "generating": "生成中"
+    "generating": "生成中",
+    "excludedEntitiesTitle": "{count} 个实体已被排除出阵容",
+    "excludedEntitiesDesc": "行动者过滤器将其排除，因为它们不是对话的合理参与者。如需保留某个实体，请设置 PROFILE_ENTITY_FILTER=0 并重新生成。",
+    "excludedReason_platform_or_tool": "平台/工具",
+    "excludedReason_referenced_person": "仅被引用的人物",
+    "excludedReason_abstract_concept": "抽象概念"
   },
   "step3": {
     "startGenerateReport": "开始生成结果报告",
