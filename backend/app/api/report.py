@@ -189,7 +189,9 @@ def generate_report():
                 else None
             )
             refreshed_run_state = SimulationRunner.get_run_state(simulation_id)
-            refreshed_updater = ZepGraphMemoryManager.get_updater(simulation_id)
+            refreshed_ingestion = ZepGraphMemoryManager.get_ingestion_status(
+                simulation_id
+            )
             if (
                 refreshed_state is None
                 or refreshed_project is None
@@ -204,7 +206,13 @@ def generate_report():
                     "success": False,
                     "error": "The project graph changed while reporting was starting",
                 }), 409
-            if refreshed_updater is not None or (
+            # Same criterion as the outer gate: only an active simulation or
+            # an active drain blocks; background Cloud processing does not.
+            refreshed_drain_active = (
+                refreshed_ingestion is not None
+                and refreshed_ingestion.get("state") in ('active', 'draining')
+            )
+            if refreshed_drain_active or (
                 refreshed_run_state is not None
                 and refreshed_run_state.runner_status in active_statuses
             ):
@@ -214,7 +222,7 @@ def generate_report():
                         "Simulation or Zep graph ingestion became active; "
                         "retry after it reaches a terminal state"
                     ),
-                    "ingestion_pending": refreshed_updater is not None,
+                    "ingestion_pending": refreshed_drain_active,
                 }), 409
             if (
                 refreshed_run_state is None

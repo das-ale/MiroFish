@@ -370,8 +370,14 @@ class SimulationRunner:
         
         data = state.to_detail_dict()
 
-        with open(state_file, 'w', encoding='utf-8') as f:
+        # Atomic write: run_state.json is written from the monitor thread,
+        # request threads AND the background ingestion thread. A process kill
+        # mid-write used to leave a truncated file that made the simulation
+        # unreadable (and blocked report generation) after restart.
+        tmp_file = f"{state_file}.tmp"
+        with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, state_file)
 
         cls._run_states[state.simulation_id] = state
 

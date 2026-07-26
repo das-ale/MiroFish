@@ -1211,6 +1211,13 @@ class ReportAgent:
             total_entities=context.get('total_entities', 0),
             related_facts_json=json.dumps(context.get('related_facts', [])[:10], ensure_ascii=False, indent=2),
         )
+        # 语言指令同样追加到 user prompt 末尾：仅靠系统提示末尾一行，
+        # 大纲的 title/summary/章节标题仍会漂移回中文（章节正文已有同样处理）
+        user_prompt = (
+            f"{user_prompt}\n\n{get_language_instruction()} "
+            "The report title, the summary and ALL section titles must be "
+            "written in that same language."
+        )
 
         try:
             response = self.llm.chat_json(
