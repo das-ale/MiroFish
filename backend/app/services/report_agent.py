@@ -1315,6 +1315,9 @@ class ReportAgent:
             previous_content=previous_content,
             section_title=section.title,
         )
+        # 语言指令同时放在 user prompt 末尾：长系统提示 + 多轮工具调用后，
+        # 仅靠 system 末尾一条语言指令容易在后期章节发生语言漂移
+        user_prompt = f"{user_prompt}\n\n{get_language_instruction()}"
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -1545,7 +1548,7 @@ class ReportAgent:
         
         # 达到最大迭代次数，强制生成内容
         logger.warning(t('report.sectionMaxIter', title=section.title))
-        messages.append({"role": "user", "content": REACT_FORCE_FINAL_MSG})
+        messages.append({"role": "user", "content": f"{REACT_FORCE_FINAL_MSG}\n{get_language_instruction()}"})
         
         response = self.llm.chat(
             messages=messages,
@@ -2191,11 +2194,25 @@ class ReportManager:
             清理后的内容
         """
         import re
-        
+
         if not content:
             return content
-        
+
         content = content.strip()
+
+        # 移除泄漏到正文的工具调用残留。LLM 偶尔会输出闭合标签写错的
+        # 工具调用（如 <tool_call>...</tool_search>），既不会被解析器捕获
+        # 也不该出现在最终报告里。匹配任意 <tool_call> 开头 + JSON 体 +
+        # 任意 </tool_xxx> 闭合（或无闭合）的块，以及裸的孤立闭合标签。
+        content = re.sub(
+            r'<tool_call>\s*\{.*?\}\s*(?:</tool_\w+>)?',
+            '',
+            content,
+            flags=re.DOTALL,
+        )
+        content = re.sub(r'^\s*</?tool_\w+>\s*$', '', content, flags=re.MULTILINE)
+        content = content.strip()
+
         lines = content.split('\n')
         cleaned_lines = []
         skip_next_empty = False
