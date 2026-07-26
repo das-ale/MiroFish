@@ -1086,6 +1086,36 @@ def get_simulation_profiles(simulation_id: str):
         }), 500
 
 
+@simulation_bp.route('/<simulation_id>/excluded/restore', methods=['POST'])
+def restore_excluded_entity(simulation_id: str):
+    """Readmitir una entidad excluida por el filtro de actores."""
+    try:
+        data = request.get_json() or {}
+        entity_name = data.get('name')
+        if not entity_name:
+            return jsonify({"success": False, "error": "Provide 'name'"}), 400
+        run_state = SimulationRunner.get_run_state(simulation_id)
+        if run_state is not None and run_state.runner_status in {
+            RunnerStatus.STARTING, RunnerStatus.RUNNING,
+            RunnerStatus.PAUSED, RunnerStatus.STOPPING,
+        }:
+            return jsonify({
+                "success": False,
+                "error": "Cannot modify the cast while the simulation is active",
+            }), 409
+        manager = SimulationManager()
+        profile = manager.restore_excluded_entity(simulation_id, entity_name)
+        return jsonify({"success": True, "data": {"profile": profile}})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 404
+    except Exception as e:
+        logger.error(f"Readmitir entidad falló: {str(e)}")
+        return jsonify({
+            "success": False, "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+
 @simulation_bp.route('/<simulation_id>/profiles/<int:user_id>', methods=['PUT'])
 def update_simulation_profile(simulation_id: str, user_id: int):
     """Editar bio/persona de un perfil antes de arrancar la simulación."""

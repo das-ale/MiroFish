@@ -56,6 +56,10 @@ export const getSimulationProfilesRealtime = (simulationId, platform) => {
  * 获取模拟配置
  * @param {string} simulationId
  */
+export const restoreExcludedEntity = (simulationId, name) => {
+  return service.post(`/api/simulation/${simulationId}/excluded/restore`, { name })
+}
+
 export const updateSimulationProfile = (simulationId, userId, data) => {
   return service.put(`/api/simulation/${simulationId}/profiles/${userId}`, data)
 }

@@ -88,6 +88,9 @@
               <div v-for="e in excludedEntities" :key="e.name" class="excluded-item">
                 <span class="excluded-name">{{ e.name }}</span>
                 <span class="excluded-reason">{{ $t('step2.excludedReason_' + e.reason) }}</span>
+                <button class="excluded-restore-btn" :disabled="restoringName === e.name" @click="restoreEntity(e)">
+                  {{ restoringName === e.name ? $t('step2.restoring') : $t('step2.restoreEntity') }}
+                </button>
                 <p v-if="e.why" class="excluded-why">{{ e.why }}</p>
               </div>
             </div>
@@ -676,7 +679,8 @@ import {
   getSimulationConfig,
   getSimulationConfigRealtime,
   getSimulation,
-  updateSimulationProfile
+  updateSimulationProfile,
+  restoreExcludedEntity
 } from '../api/simulation'
 
 const { t } = useI18n()
@@ -703,6 +707,23 @@ const editingProfile = ref(null)
 const editBio = ref('')
 const editPersona = ref('')
 const editSaving = ref(false)
+
+const restoringName = ref(null)
+const restoreEntity = async (entry) => {
+  if (!props.simulationId) return
+  restoringName.value = entry.name
+  try {
+    const res = await restoreExcludedEntity(props.simulationId, entry.name)
+    if (res.success) {
+      excludedEntities.value = excludedEntities.value.filter(e => e.name !== entry.name)
+      await fetchProfilesRealtime()
+    }
+  } catch (e) {
+    console.error('Error readmitiendo entidad', e)
+  } finally {
+    restoringName.value = null
+  }
+}
 
 const openEditProfile = (profile) => {
   editingProfile.value = profile
@@ -2748,4 +2769,7 @@ onUnmounted(() => {
 .edit-actions button { padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; border: 1px solid rgba(128,128,128,0.35); background: transparent; }
 .edit-actions .btn-save { background: #4a7dff; color: #fff; border-color: #4a7dff; }
 .edit-actions .btn-save:disabled { opacity: 0.6; cursor: wait; }
+
+.excluded-restore-btn { margin-left: 8px; padding: 1px 10px; border-radius: 10px; border: 1px solid rgba(74,125,255,0.5); background: transparent; color: #4a7dff; font-size: 11px; cursor: pointer; }
+.excluded-restore-btn:disabled { opacity: 0.5; cursor: wait; }
 </style>

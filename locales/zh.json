@@ -185,7 +185,9 @@
     "excludedEntitiesDesc": "行动者过滤器将其排除，因为它们不是对话的合理参与者。如需保留某个实体，请设置 PROFILE_ENTITY_FILTER=0 并重新生成。",
     "excludedReason_platform_or_tool": "平台/工具",
     "excludedReason_referenced_person": "仅被引用的人物",
-    "excludedReason_abstract_concept": "抽象概念"
+    "excludedReason_abstract_concept": "抽象概念",
+    "restoreEntity": "↩ 恢复",
+    "restoring": "生成中…"
   },
   "step3": {
     "startGenerateReport": "开始生成结果报告",

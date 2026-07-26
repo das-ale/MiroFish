@@ -185,7 +185,9 @@
     "excludedEntitiesDesc": "The actor filter removed them because they are not plausible participants of the conversation. If one should participate, disable the filter with PROFILE_ENTITY_FILTER=0 and regenerate.",
     "excludedReason_platform_or_tool": "platform/tool",
     "excludedReason_referenced_person": "referenced person",
-    "excludedReason_abstract_concept": "abstract concept"
+    "excludedReason_abstract_concept": "abstract concept",
+    "restoreEntity": "↩ include",
+    "restoring": "Generating…"
   },
   "step3": {
     "startGenerateReport": "Generate Report",

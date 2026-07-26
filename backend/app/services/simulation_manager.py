@@ -472,7 +472,7 @@ class SimulationManager:
                 graph_id=state.graph_id,
                 simulation_requirement=simulation_requirement,
                 document_text=document_text,
-                entities=filtered.entities,
+                entities=actor_entities,
                 enable_twitter=state.enable_twitter,
                 enable_reddit=state.enable_reddit
             )
@@ -544,6 +544,107 @@ class SimulationManager:
         
         return simulations
     
+    def restore_excluded_entity(
+        self,
+        simulation_id: str,
+        entity_name: str,
+    ) -> Dict[str, Any]:
+        """Readmite una entidad excluida por el filtro: genera su perfil y
+        la añade a los archivos de la simulación."""
+        state = self._load_simulation_state(simulation_id)
+        if not state:
+            raise ValueError(f"模拟不存在: {simulation_id}")
+        sim_dir = self._get_simulation_dir(simulation_id)
+
+        exc_path = os.path.join(sim_dir, "excluded_entities.json")
+        if not os.path.exists(exc_path):
+            raise ValueError("No hay entidades excluidas")
+        with open(exc_path, 'r', encoding='utf-8') as f:
+            excluded = json.load(f)
+        entry = next((e for e in excluded if e.get("name") == entity_name), None)
+        if entry is None:
+            raise ValueError(f"Entidad no excluida: {entity_name}")
+
+        # localizar la entidad en el grafo
+        reader = ZepEntityReader()
+        filtered = reader.filter_defined_entities(
+            graph_id=state.graph_id,
+            defined_entity_types=None,
+            enrich_with_edges=True,
+        )
+        entity = next(
+            (e for e in filtered.entities if e.name == entity_name), None
+        )
+        if entity is None:
+            raise ValueError(f"Entidad no encontrada en el grafo: {entity_name}")
+
+        # siguiente user_id
+        reddit_path = os.path.join(sim_dir, "reddit_profiles.json")
+        profiles = []
+        if os.path.exists(reddit_path):
+            with open(reddit_path, 'r', encoding='utf-8') as f:
+                profiles = json.load(f)
+        next_id = max((p.get("user_id", 0) for p in profiles), default=0) + 1
+
+        generator = OasisProfileGenerator(graph_id=state.graph_id)
+        profile = generator.generate_profile_from_entity(
+            entity, user_id=next_id, use_llm=True
+        )
+        profile.provenance["restored_by_user"] = "true"
+
+        # añadir a archivos de plataforma
+        if os.path.exists(reddit_path):
+            profiles.append(profile.to_reddit_format())
+            tmp = f"{reddit_path}.tmp"
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(profiles, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, reddit_path)
+        twitter_path = os.path.join(sim_dir, "twitter_profiles.csv")
+        if os.path.exists(twitter_path):
+            import csv
+            with open(twitter_path, 'r', encoding='utf-8', newline='') as f:
+                reader_csv = csv.DictReader(f)
+                rows = list(reader_csv)
+                fieldnames = reader_csv.fieldnames
+            if fieldnames:
+                trow = profile.to_twitter_format()
+                rows.append({k: trow.get(k, "") for k in fieldnames})
+                tmp = f"{twitter_path}.tmp"
+                with open(tmp, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(rows)
+                os.replace(tmp, twitter_path)
+
+        # actualizar sidecar de procedencia y lista de excluidas
+        prov_path = os.path.join(sim_dir, "profiles_provenance.json")
+        try:
+            prov = []
+            if os.path.exists(prov_path):
+                with open(prov_path, 'r', encoding='utf-8') as f:
+                    prov = json.load(f)
+            prov.append({
+                "user_id": next_id,
+                "name": profile.name,
+                "provenance": profile.provenance,
+            })
+            with open(prov_path, 'w', encoding='utf-8') as f:
+                json.dump(prov, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"sidecar溯源: {e}")
+
+        excluded = [e for e in excluded if e.get("name") != entity_name]
+        tmp = f"{exc_path}.tmp"
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(excluded, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, exc_path)
+
+        state.profiles_count = len(profiles)
+        state.entities_count += 1
+        self._save_simulation_state(state)
+        logger.info(f"Entidad readmitida: {entity_name} (user_id={next_id})")
+        return profile.to_reddit_format()
+
     def update_profile_persona(
         self,
         simulation_id: str,

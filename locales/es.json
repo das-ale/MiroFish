@@ -185,7 +185,9 @@
     "excludedEntitiesDesc": "El filtro de actores las apartó porque no son participantes plausibles de la conversación. Si alguna debería participar, desactiva el filtro con PROFILE_ENTITY_FILTER=0 y regenera.",
     "excludedReason_platform_or_tool": "plataforma/herramienta",
     "excludedReason_referenced_person": "persona solo citada",
-    "excludedReason_abstract_concept": "concepto abstracto"
+    "excludedReason_abstract_concept": "concepto abstracto",
+    "restoreEntity": "↩ incluir",
+    "restoring": "Generando…"
   },
   "step3": {
     "startGenerateReport": "Generar informe",
