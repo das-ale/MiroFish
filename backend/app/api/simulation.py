@@ -1086,6 +1086,55 @@ def get_simulation_profiles(simulation_id: str):
         }), 500
 
 
+@simulation_bp.route('/<simulation_id>/profiles/<int:user_id>', methods=['PUT'])
+def update_simulation_profile(simulation_id: str, user_id: int):
+    """Editar bio/persona de un perfil antes de arrancar la simulación."""
+    try:
+        data = request.get_json() or {}
+        bio = data.get('bio')
+        persona = data.get('persona')
+        if bio is None and persona is None:
+            return jsonify({
+                "success": False,
+                "error": "Provide 'bio' and/or 'persona'",
+            }), 400
+        for value in (bio, persona):
+            if value is not None and not isinstance(value, str):
+                return jsonify({
+                    "success": False,
+                    "error": "'bio' and 'persona' must be strings",
+                }), 400
+
+        # No editar el reparto con la simulación en marcha
+        run_state = SimulationRunner.get_run_state(simulation_id)
+        if run_state is not None and run_state.runner_status in {
+            RunnerStatus.STARTING,
+            RunnerStatus.RUNNING,
+            RunnerStatus.PAUSED,
+            RunnerStatus.STOPPING,
+        }:
+            return jsonify({
+                "success": False,
+                "error": "Cannot edit profiles while the simulation is active",
+            }), 409
+
+        manager = SimulationManager()
+        updated = manager.update_profile_persona(
+            simulation_id, user_id, bio=bio, persona=persona
+        )
+        return jsonify({"success": True, "data": {"profile": updated}})
+
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 404
+    except Exception as e:
+        logger.error(f"编辑Profile失败: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+
 @simulation_bp.route('/<simulation_id>/profiles/realtime', methods=['GET'])
 def get_simulation_profiles_realtime(simulation_id: str):
     """

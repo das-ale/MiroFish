@@ -108,6 +108,7 @@
                 <div class="profile-header">
                   <span class="profile-realname">{{ profile.username || 'Unknown' }}</span>
                   <span class="profile-username">@{{ profile.name || `agent_${idx}` }}</span>
+                  <button class="profile-edit-btn" @click.stop="openEditProfile(profile)" :title="$t('step2.editPersona')">✎</button>
                 </div>
                 <div class="profile-meta">
                   <span class="profile-profession">{{ profile.profession || $t('step2.unknownProfession') }}</span>
@@ -645,6 +646,24 @@
       </div>
     </div>
   </div>
+
+  <!-- Modal edición de persona -->
+  <div v-if="editingProfile" class="edit-modal-overlay" @click.self="editingProfile = null">
+    <div class="edit-modal">
+      <h4>{{ $t('step2.editPersonaTitle', { name: editingProfile.name }) }}</h4>
+      <p class="edit-hint">{{ $t('step2.editPersonaHint') }}</p>
+      <label>{{ $t('step2.bioLabel') }}</label>
+      <textarea v-model="editBio" rows="2"></textarea>
+      <label>{{ $t('step2.personaLabel') }}</label>
+      <textarea v-model="editPersona" rows="8"></textarea>
+      <div class="edit-actions">
+        <button class="btn-cancel" @click="editingProfile = null">{{ $t('common.cancel') }}</button>
+        <button class="btn-save" :disabled="editSaving" @click="saveProfileEdit">
+          {{ editSaving ? $t('step2.saving') : $t('common.confirm') }}
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -655,7 +674,9 @@ import {
   getPrepareStatus,
   getSimulationProfilesRealtime,
   getSimulationConfig,
-  getSimulationConfigRealtime
+  getSimulationConfigRealtime,
+  getSimulation,
+  updateSimulationProfile
 } from '../api/simulation'
 
 const { t } = useI18n()
@@ -678,6 +699,37 @@ const progressMessage = ref('')
 const profiles = ref([])
 const excludedEntities = ref([])
 const showExcluded = ref(false)
+const editingProfile = ref(null)
+const editBio = ref('')
+const editPersona = ref('')
+const editSaving = ref(false)
+
+const openEditProfile = (profile) => {
+  editingProfile.value = profile
+  editBio.value = profile.bio || ''
+  editPersona.value = profile.persona || ''
+}
+
+const saveProfileEdit = async () => {
+  if (!editingProfile.value || !props.simulationId) return
+  editSaving.value = true
+  try {
+    const res = await updateSimulationProfile(
+      props.simulationId,
+      editingProfile.value.user_id,
+      { bio: editBio.value, persona: editPersona.value }
+    )
+    if (res.success) {
+      editingProfile.value.bio = editBio.value
+      editingProfile.value.persona = editPersona.value
+      editingProfile.value = null
+    }
+  } catch (e) {
+    console.error('Error guardando perfil', e)
+  } finally {
+    editSaving.value = false
+  }
+}
 const entityTypes = ref([])
 const expectedTotal = ref(null)
 const simulationConfig = ref(null)
@@ -2683,4 +2735,17 @@ onUnmounted(() => {
   font-size: 11px;
 }
 .excluded-why { margin: 3px 0 0; opacity: 0.7; }
+
+.profile-edit-btn { margin-left: auto; border: none; background: transparent; cursor: pointer; opacity: 0.45; font-size: 13px; }
+.profile-edit-btn:hover { opacity: 1; }
+.edit-modal-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; }
+.edit-modal { background: var(--bg-color, #fff); border-radius: 10px; padding: 20px; width: min(560px, 92vw); max-height: 85vh; overflow: auto; }
+.edit-modal h4 { margin: 0 0 4px; }
+.edit-hint { font-size: 12px; opacity: 0.7; margin: 0 0 12px; }
+.edit-modal label { display: block; font-size: 12px; font-weight: 600; margin: 10px 0 4px; }
+.edit-modal textarea { width: 100%; box-sizing: border-box; border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; padding: 8px; font-size: 13px; font-family: inherit; resize: vertical; }
+.edit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.edit-actions button { padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; border: 1px solid rgba(128,128,128,0.35); background: transparent; }
+.edit-actions .btn-save { background: #4a7dff; color: #fff; border-color: #4a7dff; }
+.edit-actions .btn-save:disabled { opacity: 0.6; cursor: wait; }
 </style>

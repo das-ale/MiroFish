@@ -544,6 +544,93 @@ class SimulationManager:
         
         return simulations
     
+    def update_profile_persona(
+        self,
+        simulation_id: str,
+        user_id: int,
+        bio: str = None,
+        persona: str = None,
+    ) -> Dict[str, Any]:
+        """Edita bio/persona de un perfil ya generado (antes de simular).
+
+        Reescribe los archivos que consume OASIS (reddit JSON y twitter CSV)
+        y marca los campos editados como 'user_edited' en el sidecar de
+        procedencia.
+        """
+        state = self._load_simulation_state(simulation_id)
+        if not state:
+            raise ValueError(f"模拟不存在: {simulation_id}")
+        sim_dir = self._get_simulation_dir(simulation_id)
+        updated = None
+
+        reddit_path = os.path.join(sim_dir, "reddit_profiles.json")
+        if os.path.exists(reddit_path):
+            with open(reddit_path, 'r', encoding='utf-8') as f:
+                profiles = json.load(f)
+            for prof in profiles:
+                if prof.get("user_id") == user_id:
+                    if bio is not None:
+                        prof["bio"] = bio
+                    if persona is not None:
+                        prof["persona"] = persona
+                    updated = prof
+                    break
+            if updated is not None:
+                tmp = f"{reddit_path}.tmp"
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    json.dump(profiles, f, ensure_ascii=False, indent=2)
+                os.replace(tmp, reddit_path)
+
+        twitter_path = os.path.join(sim_dir, "twitter_profiles.csv")
+        if os.path.exists(twitter_path):
+            import csv
+            with open(twitter_path, 'r', encoding='utf-8', newline='') as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+                fieldnames = reader.fieldnames
+            changed = False
+            for row in rows:
+                if str(row.get("user_id")) == str(user_id):
+                    if bio is not None and "bio" in row:
+                        row["bio"] = bio
+                    if persona is not None and "persona" in row:
+                        row["persona"] = persona
+                    updated = updated or row
+                    changed = True
+                    break
+            if changed and fieldnames:
+                tmp = f"{twitter_path}.tmp"
+                with open(tmp, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(rows)
+                os.replace(tmp, twitter_path)
+
+        if updated is None:
+            raise ValueError(f"Profile no encontrado: user_id={user_id}")
+
+        # marcar procedencia como editada por el usuario
+        prov_path = os.path.join(sim_dir, "profiles_provenance.json")
+        if os.path.exists(prov_path):
+            try:
+                with open(prov_path, 'r', encoding='utf-8') as f:
+                    prov = json.load(f)
+                for item in prov:
+                    if item.get("user_id") == user_id:
+                        if bio is not None:
+                            item.setdefault("provenance", {})["bio"] = "user_edited"
+                        if persona is not None:
+                            item.setdefault("provenance", {})["persona"] = "user_edited"
+                        break
+                tmp = f"{prov_path}.tmp"
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    json.dump(prov, f, ensure_ascii=False, indent=2)
+                os.replace(tmp, prov_path)
+            except Exception as prov_error:
+                logger.warning(f"更新溯源sidecar失败: {prov_error}")
+
+        return dict(updated)
+
     def get_profiles(self, simulation_id: str, platform: str = None) -> List[Dict[str, Any]]:
         """获取模拟的Agent Profile"""
         state = self._load_simulation_state(simulation_id)

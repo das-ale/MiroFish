@@ -56,6 +56,10 @@ export const getSimulationProfilesRealtime = (simulationId, platform) => {
  * 获取模拟配置
  * @param {string} simulationId
  */
+export const updateSimulationProfile = (simulationId, userId, data) => {
+  return service.put(`/api/simulation/${simulationId}/profiles/${userId}`, data)
+}
+
 export const getSimulationConfig = (simulationId) => {
   return service.get(`/api/simulation/${simulationId}/config`)
 }
