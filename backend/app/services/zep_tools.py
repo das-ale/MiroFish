@@ -19,6 +19,7 @@ from ..utils.logger import get_logger
 from ..utils.llm_client import LLMClient
 from ..utils.locale import get_locale, t
 from ..utils.zep_paging import fetch_all_nodes, fetch_all_edges
+from ..utils.graph_provenance import classify_origin, tag_fact, ORIGIN_TAGS
 from ..utils.zep import (
     call_zep_read_with_retry,
     get_zep_client,
@@ -98,7 +99,9 @@ class EdgeInfo:
     valid_at: Optional[str] = None
     invalid_at: Optional[str] = None
     expired_at: Optional[str] = None
-    
+    # 来源: 'document'（源文档） / 'simulation'（模拟产物） / None（未知）
+    origin: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "uuid": self.uuid,
@@ -111,14 +114,17 @@ class EdgeInfo:
             "created_at": self.created_at,
             "valid_at": self.valid_at,
             "invalid_at": self.invalid_at,
-            "expired_at": self.expired_at
+            "expired_at": self.expired_at,
+            "origin": self.origin,
         }
-    
+
     def to_text(self, include_temporal: bool = False) -> str:
         """转换为文本格式"""
         source = self.source_node_name or self.source_node_uuid[:8]
         target = self.target_node_name or self.target_node_uuid[:8]
-        base_text = f"关系: {source} --[{self.name}]--> {target}\n事实: {self.fact}"
+        origin_tag = ORIGIN_TAGS.get(self.origin)
+        fact_text = f"{origin_tag} {self.fact}" if origin_tag else self.fact
+        base_text = f"关系: {source} --[{self.name}]--> {target}\n事实: {fact_text}"
         
         if include_temporal:
             valid_at = self.valid_at or "未知"
@@ -497,17 +503,19 @@ class ZepToolsService:
             edges = []
             nodes = []
             
-            # 解析边搜索结果
+            # 解析边搜索结果（附带 [DOC]/[SIM] 来源标签）
             if hasattr(search_results, 'edges') and search_results.edges:
                 for edge in search_results.edges:
+                    edge_created = getattr(edge, 'created_at', None)
                     if hasattr(edge, 'fact') and edge.fact:
-                        facts.append(edge.fact)
+                        facts.append(tag_fact(edge.fact, edge_created, graph_id))
                     edges.append({
                         "uuid": getattr(edge, 'uuid_', None) or getattr(edge, 'uuid', ''),
                         "name": getattr(edge, 'name', ''),
                         "fact": getattr(edge, 'fact', ''),
                         "source_node_uuid": getattr(edge, 'source_node_uuid', ''),
                         "target_node_uuid": getattr(edge, 'target_node_uuid', ''),
+                        "origin": classify_origin(edge_created, graph_id),
                     })
             
             # 解析节点搜索结果
@@ -600,13 +608,16 @@ class ZepToolsService:
                 
                 for score, edge in scored_edges[:limit]:
                     if edge.fact:
-                        facts.append(edge.fact)
+                        facts.append(
+                            tag_fact(edge.fact, edge.created_at, graph_id)
+                        )
                     edges_result.append({
                         "uuid": edge.uuid,
                         "name": edge.name,
                         "fact": edge.fact,
                         "source_node_uuid": edge.source_node_uuid,
                         "target_node_uuid": edge.target_node_uuid,
+                        "origin": classify_origin(edge.created_at, graph_id),
                     })
             
             if scope in ["nodes", "both"]:
@@ -689,17 +700,19 @@ class ZepToolsService:
         result = []
         for edge in edges:
             edge_uuid = getattr(edge, 'uuid_', None) or getattr(edge, 'uuid', None) or ""
+            edge_created = getattr(edge, 'created_at', None)
             edge_info = EdgeInfo(
                 uuid=str(edge_uuid) if edge_uuid else "",
                 name=edge.name or "",
                 fact=edge.fact or "",
                 source_node_uuid=edge.source_node_uuid or "",
-                target_node_uuid=edge.target_node_uuid or ""
+                target_node_uuid=edge.target_node_uuid or "",
+                origin=classify_origin(edge_created, graph_id),
             )
 
             # 添加时间信息
             if include_temporal:
-                edge_info.created_at = getattr(edge, 'created_at', None)
+                edge_info.created_at = edge_created
                 edge_info.valid_at = getattr(edge, 'valid_at', None)
                 edge_info.invalid_at = getattr(edge, 'invalid_at', None)
                 edge_info.expired_at = getattr(edge, 'expired_at', None)
@@ -1196,15 +1209,18 @@ class ZepToolsService:
             # 判断是否过期/失效
             is_historical = edge.is_expired or edge.is_invalid
             
+            origin_tag = ORIGIN_TAGS.get(edge.origin)
+            tagged_fact = f"{origin_tag} {edge.fact}" if origin_tag else edge.fact
+
             if is_historical:
                 # 历史/过期事实，添加时间标记
                 valid_at = edge.valid_at or "未知"
                 invalid_at = edge.invalid_at or edge.expired_at or "未知"
-                fact_with_time = f"[{valid_at} - {invalid_at}] {edge.fact}"
+                fact_with_time = f"[{valid_at} - {invalid_at}] {tagged_fact}"
                 historical_facts.append(fact_with_time)
             else:
                 # 当前有效事实
-                active_facts.append(edge.fact)
+                active_facts.append(tagged_fact)
         
         # 基于查询进行相关性排序
         query_lower = query.lower()

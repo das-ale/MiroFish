@@ -393,6 +393,26 @@ class SimulationManager:
             state.profiles_count = len(profiles)
             state.profiles_generated = len(profiles) > 0
             self._save_simulation_state(state)
+
+            # Sidecar de溯源 por perfil (los formatos OASIS no lo admiten)
+            try:
+                provenance_payload = [
+                    {
+                        "user_id": p.user_id,
+                        "name": p.name,
+                        "provenance": p.provenance,
+                    }
+                    for p in profiles
+                ]
+                with open(
+                    os.path.join(sim_dir, "profiles_provenance.json"),
+                    'w', encoding='utf-8',
+                ) as f:
+                    json.dump(
+                        provenance_payload, f, ensure_ascii=False, indent=2
+                    )
+            except Exception as prov_error:
+                logger.warning(f"保存溯源sidecar失败: {prov_error}")
             
             # 保存Profile文件（注意：Twitter使用CSV格式，Reddit使用JSON格式）
             # Reddit 已经在生成过程中实时保存了，这里再保存一次确保完整性

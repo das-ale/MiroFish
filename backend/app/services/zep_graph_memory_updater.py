@@ -804,6 +804,11 @@ class ZepGraphMemoryManager:
             updater.start()
             cls._updaters[simulation_id] = updater
             cls._stop_all_done = False
+
+            # Marca de procedencia: desde este instante, los hechos nuevos
+            # del grafo proceden de la simulación, no de los documentos.
+            from ..utils.graph_provenance import record_first_simulation
+            record_first_simulation(graph_id)
             
             logger.info(f"创建图谱记忆更新器: simulation_id={simulation_id}, graph_id={graph_id}")
             return updater

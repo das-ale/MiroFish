@@ -106,6 +106,8 @@ class OasisAgentProfile:
     # 来源实体信息
     source_entity_uuid: Optional[str] = None
     source_entity_type: Optional[str] = None
+    # 字段级溯源: observed / inferred / synthetic
+    provenance: Dict[str, str] = field(default_factory=dict)
     
     created_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
     
@@ -199,6 +201,7 @@ class OasisAgentProfile:
             "interested_topics": self.interested_topics,
             "source_entity_uuid": self.source_entity_uuid,
             "source_entity_type": self.source_entity_type,
+            "provenance": self.provenance,
             "created_at": self.created_at,
         }
 
@@ -290,14 +293,14 @@ class OasisProfileGenerator:
             OasisAgentProfile
         """
         entity_type = entity.get_entity_type() or "Entity"
-        
+
         # 基础信息
         name = entity.name
         user_name = self._generate_username(name)
-        
+
         # 构建上下文信息
         context = self._build_entity_context(entity)
-        
+
         if use_llm:
             # 使用LLM生成详细人设
             profile_data = self._generate_profile_with_llm(
@@ -315,7 +318,29 @@ class OasisProfileGenerator:
                 entity_summary=entity.summary,
                 entity_attributes=entity.attributes
             )
-        
+
+        # 结构化溯源：按代码路径确定每个字段的来源，不依赖LLM自报。
+        # - observed: 直接来自图谱实体（源文档提取）
+        # - inferred: LLM根据上下文推断
+        # - synthetic: 为满足OASIS格式而编造（随机数/模板/性格测试）
+        always_synthetic = (
+            "user_name", "karma", "friend_count", "follower_count",
+            "statuses_count", "mbti",
+        )
+        provenance = {"name": "observed", "source_entity_type": "observed"}
+        for field_name in always_synthetic:
+            provenance[field_name] = "synthetic"
+        for field_name in (
+            "bio", "persona", "age", "gender", "country", "profession",
+            "interested_topics",
+        ):
+            value = profile_data.get(field_name)
+            provenance[field_name] = (
+                "inferred"
+                if use_llm and value not in (None, "", [])
+                else "synthetic"
+            )
+
         return OasisAgentProfile(
             user_id=user_id,
             user_name=user_name,
@@ -334,6 +359,7 @@ class OasisProfileGenerator:
             interested_topics=profile_data.get("interested_topics", []),
             source_entity_uuid=entity.uuid,
             source_entity_type=entity_type,
+            provenance=provenance,
         )
     
     def _generate_username(self, name: str) -> str:

@@ -1047,13 +1047,27 @@ def get_simulation_profiles(simulation_id: str):
 
         manager = SimulationManager()
         profiles = manager.get_profiles(simulation_id, platform=platform)
-        
+
+        # 字段级溯源（observed/inferred/synthetic），si el sidecar existe
+        provenance = None
+        prov_path = os.path.join(
+            manager._get_simulation_dir(simulation_id),
+            "profiles_provenance.json",
+        )
+        if os.path.exists(prov_path):
+            try:
+                with open(prov_path, 'r', encoding='utf-8') as f:
+                    provenance = json.load(f)
+            except Exception:
+                pass
+
         return jsonify({
             "success": True,
             "data": {
                 "platform": platform,
                 "count": len(profiles),
-                "profiles": profiles
+                "profiles": profiles,
+                "provenance": provenance
             }
         })
         

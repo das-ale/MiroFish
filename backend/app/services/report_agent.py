@@ -549,6 +549,21 @@ TOOL_DESC_INTERVIEW_AGENTS = """\
 
 # ── 大纲规划 prompt ──
 
+FACT_ORIGIN_RULES = """\
+【事实来源标签 - 必须遵守】
+工具返回的事实可能带有来源标签：
+- [DOC] = 来自用户上传的源文档，是现实世界的输入信息
+- [SIM] = 模拟过程中由Agent产生（发言/行为/传闻），是模拟产物，不是现实事实
+
+规则：
+1. 报告必须区分现实背景（[DOC]）与模拟观察（[SIM]）。
+2. 绝不能把 [SIM] 信息表述为现实世界的事实——尤其是Agent在模拟中编造的\
+数据、指标、价格或承诺。正确表述："在模拟的对话中，X声称/认为…"。
+3. 如果一个关键数字或事实只有 [SIM] 来源而没有 [DOC] 佐证，必须明确说明\
+它是模拟中产生的说法。
+4. 无标签的事实来源不确定，引用时保持谨慎措辞。
+"""
+
 PLAN_SYSTEM_PROMPT = """\
 你是一个「未来预测报告」的撰写专家，拥有对模拟世界的「上帝视角」——你可以洞察模拟中每一位Agent的行为、言论和互动。
 
@@ -1202,7 +1217,7 @@ class ReportAgent:
         if progress_callback:
             progress_callback("planning", 30, t('progress.generatingOutline'))
         
-        system_prompt = f"{PLAN_SYSTEM_PROMPT}\n\n{get_language_instruction()}"
+        system_prompt = f"{PLAN_SYSTEM_PROMPT}\n\n{FACT_ORIGIN_RULES}\n{get_language_instruction()}"
         user_prompt = PLAN_USER_PROMPT_TEMPLATE.format(
             simulation_requirement=self.simulation_requirement,
             total_nodes=context.get('graph_statistics', {}).get('total_nodes', 0),
@@ -1305,7 +1320,7 @@ class ReportAgent:
             section_title=section.title,
             tools_description=self._get_tools_description(),
         )
-        system_prompt = f"{system_prompt}\n\n{get_language_instruction()}"
+        system_prompt = f"{system_prompt}\n\n{FACT_ORIGIN_RULES}\n{get_language_instruction()}"
 
         # 构建用户prompt - 每个已完成章节各传入最大4000字
         if previous_sections:
@@ -1874,7 +1889,7 @@ class ReportAgent:
             report_content=report_content if report_content else "（暂无报告）",
             tools_description=self._get_tools_description(),
         )
-        system_prompt = f"{system_prompt}\n\n{get_language_instruction()}"
+        system_prompt = f"{system_prompt}\n\n{FACT_ORIGIN_RULES}\n{get_language_instruction()}"
 
         # 构建消息
         messages = [{"role": "system", "content": system_prompt}]
