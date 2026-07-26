@@ -42,14 +42,21 @@ def test_report_generation_waits_for_zep_ingestion(monkeypatch):
         "get_run_state",
         classmethod(
             lambda _cls, _simulation_id: SimpleNamespace(
-                runner_status=RunnerStatus.STOPPING
+                runner_status=RunnerStatus.STOPPED
             )
         ),
     )
+    # The bounded drain (flushing batches to Zep) still blocks the report.
     monkeypatch.setattr(
         report_api.ZepGraphMemoryManager,
-        "get_updater",
-        classmethod(lambda _cls, _simulation_id: object()),
+        "get_ingestion_status",
+        classmethod(
+            lambda _cls, _simulation_id: {
+                "state": "draining",
+                "pending_episodes": 0,
+                "error": None,
+            }
+        ),
     )
 
     app = Flask(__name__)
@@ -62,6 +69,55 @@ def test_report_generation_waits_for_zep_ingestion(monkeypatch):
 
     assert status == 409
     assert body["ingestion_pending"] is True
+
+
+def test_background_cloud_processing_does_not_block_report(monkeypatch):
+    """awaiting_processing passes the gate (proven by reaching the 404)."""
+    simulation = SimpleNamespace(project_id="proj-1", graph_id="graph-1")
+    monkeypatch.setattr(
+        report_api,
+        "SimulationManager",
+        lambda: SimpleNamespace(
+            get_simulation=lambda _simulation_id: simulation
+        ),
+    )
+    monkeypatch.setattr(
+        report_api.SimulationRunner,
+        "get_run_state",
+        classmethod(
+            lambda _cls, _simulation_id: SimpleNamespace(
+                runner_status=RunnerStatus.STOPPED
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        report_api.ZepGraphMemoryManager,
+        "get_ingestion_status",
+        classmethod(
+            lambda _cls, _simulation_id: {
+                "state": "awaiting_processing",
+                "pending_episodes": 48,
+                "error": None,
+            }
+        ),
+    )
+    # Project lookup fails AFTER the ingestion gate: reaching 404 proves the
+    # background wait no longer 409s the request.
+    monkeypatch.setattr(
+        report_api.ProjectManager,
+        "get_project",
+        classmethod(lambda _cls, _project_id: None),
+    )
+
+    app = Flask(__name__)
+    with app.test_request_context(
+        "/api/report/generate",
+        method="POST",
+        json={"simulation_id": "sim-1"},
+    ):
+        body, status = _json_result(report_api.generate_report())
+
+    assert status == 404
 
 
 def test_active_rerun_does_not_return_a_stale_completed_report(monkeypatch):
@@ -94,8 +150,14 @@ def test_active_rerun_does_not_return_a_stale_completed_report(monkeypatch):
     )
     monkeypatch.setattr(
         report_api.ZepGraphMemoryManager,
-        "get_updater",
-        classmethod(lambda _cls, _simulation_id: object()),
+        "get_ingestion_status",
+        classmethod(
+            lambda _cls, _simulation_id: {
+                "state": "draining",
+                "pending_episodes": 3,
+                "error": None,
+            }
+        ),
     )
 
     app = Flask(__name__)

@@ -148,9 +148,13 @@ class SimulationRunState:
     
     # 错误信息
     error: Optional[str] = None
-    
+
     # 进程ID（用于停止）
     process_pid: Optional[int] = None
+
+    # Zep摄取状态（信息性，不再阻塞终态）: None | processing | complete | failed
+    zep_ingestion_status: Optional[str] = None
+    zep_ingestion_pending: int = 0
     
     def add_action(self, action: AgentAction):
         """添加动作到最近动作列表"""
@@ -191,6 +195,8 @@ class SimulationRunState:
             "completed_at": self.completed_at,
             "error": self.error,
             "process_pid": self.process_pid,
+            "zep_ingestion_status": self.zep_ingestion_status,
+            "zep_ingestion_pending": self.zep_ingestion_pending,
         }
     
     def to_detail_dict(self) -> Dict[str, Any]:
@@ -331,6 +337,8 @@ class SimulationRunner:
                 completed_at=data.get("completed_at"),
                 error=data.get("error"),
                 process_pid=data.get("process_pid"),
+                zep_ingestion_status=data.get("zep_ingestion_status"),
+                zep_ingestion_pending=data.get("zep_ingestion_pending", 0),
             )
             
             # 加载最近动作
@@ -361,11 +369,44 @@ class SimulationRunner:
         state_file = os.path.join(sim_dir, "run_state.json")
         
         data = state.to_detail_dict()
-        
+
         with open(state_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        
+
         cls._run_states[state.simulation_id] = state
+
+    # 关机期间强制阻塞式drain：进程退出后没有任何线程能完成后台等待
+    _shutdown_in_progress = False
+
+    @classmethod
+    def _zep_blocking_mode(cls) -> bool:
+        """Blocking ingestion wait: legacy env escape hatch, forced at shutdown."""
+        if cls._shutdown_in_progress:
+            return True
+        return os.environ.get(
+            "ZEP_INGESTION_BLOCKING", "0"
+        ).lower() in ("1", "true", "yes")
+
+    @classmethod
+    def _make_ingestion_callback(cls, simulation_id: str):
+        """Build the on_complete hook that records the background result."""
+
+        def _on_complete(final_status: str):
+            with cls._finalization_lock(simulation_id):
+                state = cls.get_run_state(simulation_id)
+                if state is None:
+                    return
+                state.zep_ingestion_status = final_status
+                state.zep_ingestion_pending = 0
+                if final_status == 'failed':
+                    logger.warning(
+                        "Zep后台摄取未完成: simulation_id=%s "
+                        "(模拟数据本地完整，图谱可能缺少部分事实)",
+                        simulation_id,
+                    )
+                cls._save_run_state(state)
+
+        return _on_complete
     
     @classmethod
     def start_simulation(
@@ -708,9 +749,11 @@ class SimulationRunner:
                     state.reddit_running = False
 
                     if cls._graph_memory_enabled.get(simulation_id, False):
-                        # STOPPING is a non-terminal ingestion barrier. The UI
-                        # and report API must not observe COMPLETED until every
-                        # accepted episode is processed by Zep Cloud.
+                        # STOPPING covers only the bounded drain (flush of
+                        # buffered batches). Waiting for Zep Cloud to PROCESS
+                        # the episodes no longer blocks the terminal state:
+                        # it continues in background and is surfaced through
+                        # zep_ingestion_status.
                         state.runner_status = RunnerStatus.STOPPING
                         cls._save_run_state(state)
                         cls._sync_simulation_status(
@@ -718,16 +761,47 @@ class SimulationRunner:
                             RunnerStatus.STOPPING,
                         )
                         try:
-                            ZepGraphMemoryManager.stop_updater(simulation_id)
+                            if cls._zep_blocking_mode():
+                                ZepGraphMemoryManager.stop_updater(simulation_id)
+                                state.zep_ingestion_status = 'complete'
+                                state.zep_ingestion_pending = 0
+                            else:
+                                ingestion = (
+                                    ZepGraphMemoryManager
+                                    .finalize_updater_background(
+                                        simulation_id,
+                                        on_complete=(
+                                            cls._make_ingestion_callback(
+                                                simulation_id
+                                            )
+                                        ),
+                                    )
+                                )
+                                pending = ingestion.get("pending_episodes", 0)
+                                state.zep_ingestion_status = (
+                                    'complete' if pending == 0 else 'processing'
+                                )
+                                state.zep_ingestion_pending = pending
+                                if pending:
+                                    logger.info(
+                                        "Zep摄取转入后台: simulation_id=%s, "
+                                        "pending=%d",
+                                        simulation_id,
+                                        pending,
+                                    )
                             cls._graph_memory_enabled.pop(simulation_id, None)
                             logger.info(
                                 "已停止图谱记忆更新: simulation_id=%s",
                                 simulation_id,
                             )
                         except Exception as error:
+                            # Only real data loss lands here (stuck worker or
+                            # failed batch send) — slow Cloud processing does
+                            # not raise anymore.
                             logger.error(f"停止图谱记忆更新器失败: {error}")
                             desired_status = RunnerStatus.FAILED
                             error_message = f"Zep图谱写入未完整完成: {error}"
+                            state.zep_ingestion_status = 'failed'
 
                     state.runner_status = desired_status
                     state.error = error_message
@@ -1043,9 +1117,32 @@ class SimulationRunner:
             # the same barrier synchronously in this request.
             with cls._finalization_lock(simulation_id):
                 state = cls.get_run_state(simulation_id) or state
-                if cls._graph_memory_enabled.get(simulation_id, False):
+                graph_memory_pending = (
+                    cls._graph_memory_enabled.get(simulation_id, False)
+                    or ZepGraphMemoryManager.get_updater(simulation_id)
+                    is not None
+                )
+                if graph_memory_pending:
                     try:
-                        ZepGraphMemoryManager.stop_updater(simulation_id)
+                        if cls._zep_blocking_mode():
+                            ZepGraphMemoryManager.stop_updater(simulation_id)
+                            state.zep_ingestion_status = 'complete'
+                            state.zep_ingestion_pending = 0
+                        else:
+                            ingestion = (
+                                ZepGraphMemoryManager
+                                .finalize_updater_background(
+                                    simulation_id,
+                                    on_complete=cls._make_ingestion_callback(
+                                        simulation_id
+                                    ),
+                                )
+                            )
+                            pending = ingestion.get("pending_episodes", 0)
+                            state.zep_ingestion_status = (
+                                'complete' if pending == 0 else 'processing'
+                            )
+                            state.zep_ingestion_pending = pending
                         cls._graph_memory_enabled.pop(simulation_id, None)
                     except Exception as error:
                         state.runner_status = RunnerStatus.FAILED
@@ -1053,6 +1150,7 @@ class SimulationRunner:
                         state.reddit_running = False
                         state.completed_at = datetime.now().isoformat()
                         state.error = f"Zep图谱写入未完整完成: {error}"
+                        state.zep_ingestion_status = 'failed'
                         cls._save_run_state(state)
                         cls._sync_simulation_status(
                             simulation_id,
@@ -1456,6 +1554,9 @@ class SimulationRunner:
         if cls._cleanup_done:
             return
         cls._cleanup_done = True
+        # Force blocking ingestion waits from here on: after this process
+        # exits there is nothing left to run a background wait.
+        cls._shutdown_in_progress = True
 
         updater_ids = set(ZepGraphMemoryManager.get_simulation_ids())
         simulation_ids = sorted(

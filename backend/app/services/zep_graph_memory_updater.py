@@ -14,6 +14,7 @@ from ..config import Config
 from ..utils.logger import get_logger
 from ..utils.locale import get_locale, set_locale
 from ..utils.zep import (
+    ZEP_INGESTION_BACKGROUND_TIMEOUT_SECONDS,
     ZEP_INGESTION_WAIT_TIMEOUT_SECONDS,
     call_zep_read_with_retry,
     get_zep_client,
@@ -285,7 +286,13 @@ class ZepGraphMemoryUpdater:
         self._skipped_count = 0     # 被过滤跳过的活动数（DO_NOTHING）
         self._failed_batches: List[Dict[str, Any]] = []
         self._pending_episode_uuids: List[str] = []
-        
+
+        # 摄取生命周期: active -> draining -> awaiting_processing -> complete/failed
+        # （无 pending episode 时 draining 直接进入 complete）
+        self._ingestion_state = 'active'
+        self._ingestion_error: Optional[str] = None
+        self._background_thread: Optional[threading.Thread] = None
+
         logger.info(f"ZepGraphMemoryUpdater 初始化完成: graph_id={graph_id}, batch_size={self.BATCH_SIZE}")
     
     def _get_platform_display_name(self, platform: str) -> str:
@@ -311,8 +318,39 @@ class ZepGraphMemoryUpdater:
         logger.info(f"ZepGraphMemoryUpdater 已启动: graph_id={self.graph_id}")
     
     def stop(self):
-        """Drain the worker, flush tail events, and wait for Cloud ingestion."""
+        """Drain the worker, flush tail events, and wait for Cloud ingestion.
+
+        Legacy blocking behavior: drain + synchronous wait until Zep Cloud has
+        processed every episode. Prefer drain() + finalize_in_background() for
+        the simulation stop flow.
+        """
         deadline = time.time() + ZEP_INGESTION_WAIT_TIMEOUT_SECONDS
+        self.drain(deadline=deadline)
+        self.wait_for_processing(deadline=deadline)
+
+    def drain(self, *, deadline: Optional[float] = None):
+        """Phase 1: stop accepting, join the worker, flush buffered batches.
+
+        Bounded by outbound graph.add HTTP requests only — it does NOT wait
+        for Zep Cloud to process the episodes. Raises when data was actually
+        lost (worker stuck or a batch failed to send); pending Cloud
+        processing is not an error here.
+        """
+        if self._ingestion_state not in ('active', 'draining'):
+            worker_alive = bool(
+                self._worker_thread and self._worker_thread.is_alive()
+            )
+            if self._ingestion_state == 'failed' and self._failed_batches:
+                # Real data loss persists across retries — keep failing closed.
+                raise RuntimeError(self._ingestion_error)
+            if self._ingestion_state == 'failed' and worker_alive:
+                pass  # stuck worker from a previous attempt: retry join below
+            else:
+                return  # already drained (idempotent for stop retries)
+        self._ingestion_state = 'draining'
+        if deadline is None:
+            deadline = time.time() + ZEP_INGESTION_WAIT_TIMEOUT_SECONDS
+
         # Serialize the accepting->closed transition with add_activity's
         # check+enqueue operation. This closes the small race where a producer
         # could enqueue after both the worker and final flush had exited.
@@ -323,29 +361,116 @@ class ZepGraphMemoryUpdater:
             join_timeout = max(0.0, deadline - time.time())
             self._worker_thread.join(timeout=join_timeout)
             if self._worker_thread.is_alive():
-                raise TimeoutError(
+                self._set_ingestion_failed(
                     f"Zep updater worker did not stop within {join_timeout:.0f}s"
                 )
+                raise TimeoutError(self._ingestion_error)
 
         # The worker has drained the queue. Only now is it safe to flush
         # buffers; doing this before join loses an item already dequeued by the
         # worker but not yet buffered.
-        self._flush_remaining(deadline=deadline)
+        try:
+            self._flush_remaining(deadline=deadline)
+        except TimeoutError as error:
+            self._set_ingestion_failed(str(error))
+            raise
 
         if self._failed_batches:
-            raise RuntimeError(
+            self._set_ingestion_failed(
                 f"{len(self._failed_batches)} Zep activity batch(es) failed; "
                 "simulation graph ingestion is incomplete"
             )
+            raise RuntimeError(self._ingestion_error)
 
-        self._wait_for_pending_episodes(deadline=deadline)
-        
-        logger.info(f"ZepGraphMemoryUpdater 已停止: graph_id={self.graph_id}, "
-                   f"total_activities={self._total_activities}, "
-                   f"batches_sent={self._total_sent}, "
-                   f"items_sent={self._total_items_sent}, "
-                   f"failed={self._failed_count}, "
-                   f"skipped={self._skipped_count}")
+        if self._pending_episode_uuids:
+            self._ingestion_state = 'awaiting_processing'
+        else:
+            self._ingestion_state = 'complete'
+        logger.info(
+            f"ZepGraphMemoryUpdater drenado: graph_id={self.graph_id}, "
+            f"total_activities={self._total_activities}, "
+            f"batches_sent={self._total_sent}, "
+            f"items_sent={self._total_items_sent}, "
+            f"failed={self._failed_count}, "
+            f"skipped={self._skipped_count}, "
+            f"pending_episodes={len(self._pending_episode_uuids)}"
+        )
+
+    def wait_for_processing(self, *, deadline: Optional[float] = None):
+        """Phase 2 (blocking): wait until Zep Cloud has processed all episodes."""
+        if self._ingestion_state in ('complete', 'failed'):
+            return
+        try:
+            self._wait_for_pending_episodes(deadline=deadline)
+        except Exception as error:
+            self._set_ingestion_failed(str(error))
+            raise
+        self._ingestion_state = 'complete'
+        logger.info(f"ZepGraphMemoryUpdater 已停止: graph_id={self.graph_id}")
+
+    def finalize_in_background(self, on_complete=None):
+        """Phase 2 (non-blocking): poll Cloud processing in a daemon thread.
+
+        Requires drain() to have run first. on_complete(updater, status) is
+        invoked with 'complete' or 'failed' when the wait finishes.
+        """
+        if self._ingestion_state == 'complete':
+            if on_complete:
+                on_complete(self, 'complete')
+            return
+        if self._ingestion_state == 'failed' and self._pending_episode_uuids:
+            # Previous background wait timed out; a stop retry re-arms it.
+            self._ingestion_error = None
+            self._ingestion_state = 'awaiting_processing'
+        if self._ingestion_state != 'awaiting_processing':
+            raise RuntimeError(
+                f"finalize_in_background requires a drained updater "
+                f"(state={self._ingestion_state})"
+            )
+        if self._background_thread and self._background_thread.is_alive():
+            return  # already finalizing
+
+        def _wait():
+            deadline = time.time() + ZEP_INGESTION_BACKGROUND_TIMEOUT_SECONDS
+            status = 'complete'
+            try:
+                self._wait_for_pending_episodes(deadline=deadline)
+                self._ingestion_state = 'complete'
+                logger.info(
+                    f"Zep后台摄取完成: graph_id={self.graph_id}, "
+                    f"simulation_id={self.simulation_id}"
+                )
+            except Exception as error:
+                self._set_ingestion_failed(str(error))
+                status = 'failed'
+                logger.error(
+                    f"Zep后台摄取失败: graph_id={self.graph_id}, error={error}"
+                )
+            if on_complete:
+                try:
+                    on_complete(self, status)
+                except Exception as callback_error:
+                    logger.error(f"Zep后台摄取回调失败: {callback_error}")
+
+        self._background_thread = threading.Thread(
+            target=_wait,
+            daemon=True,
+            name=f"ZepBackgroundIngest-{self.graph_id[:8]}",
+        )
+        self._background_thread.start()
+
+    def _set_ingestion_failed(self, error: str):
+        self._ingestion_state = 'failed'
+        self._ingestion_error = error
+
+    @property
+    def ingestion_status(self) -> Dict[str, Any]:
+        """Observable ingestion lifecycle for status/report APIs."""
+        return {
+            "state": self._ingestion_state,
+            "pending_episodes": len(self._pending_episode_uuids),
+            "error": self._ingestion_error,
+        }
     
     def add_activity(self, activity: AgentActivity):
         """
@@ -616,6 +741,11 @@ class ZepGraphMemoryUpdater:
                 )
                 if getattr(episode, "processed", False):
                     pending.remove(episode_uuid)
+            # Keep the observable pending list in sync so ingestion_status
+            # reports live progress while the background wait runs.
+            self._pending_episode_uuids = [
+                uuid for uuid in self._pending_episode_uuids if uuid in pending
+            ]
             if pending:
                 time.sleep(3)
         self._pending_episode_uuids = []
@@ -728,7 +858,7 @@ class ZepGraphMemoryManager:
     
     @classmethod
     def stop_updater(cls, simulation_id: str):
-        """停止并移除模拟的更新器"""
+        """停止并移除模拟的更新器（阻塞：等待 Cloud 摄取完成）"""
         with cls._lock:
             updater = cls._updaters.get(simulation_id)
         if updater is None:
@@ -743,6 +873,65 @@ class ZepGraphMemoryManager:
             if cls._updaters.get(simulation_id) is updater:
                 cls._updaters.pop(simulation_id, None)
         logger.info(f"已停止图谱记忆更新器: simulation_id={simulation_id}")
+
+    @classmethod
+    def finalize_updater_background(
+        cls,
+        simulation_id: str,
+        on_complete=None,
+    ) -> Dict[str, Any]:
+        """Drain synchronously, then wait for Cloud processing in background.
+
+        Returns the post-drain ingestion status. Raises only when drain loses
+        data (stuck worker / failed batch); slow Cloud processing is NOT an
+        error — the updater stays registered (visible to deletion barriers)
+        until the background wait removes it.
+
+        on_complete(status: str) — optional; invoked with 'complete'/'failed'
+        after the background wait finishes and the updater is deregistered.
+        """
+        with cls._lock:
+            updater = cls._updaters.get(simulation_id)
+        if updater is None:
+            return {"state": "complete", "pending_episodes": 0, "error": None}
+
+        updater.drain()  # raises on real data loss; idempotent on retries
+
+        status = updater.ingestion_status
+        if status["state"] == 'complete':
+            with cls._lock:
+                if cls._updaters.get(simulation_id) is updater:
+                    cls._updaters.pop(simulation_id, None)
+            logger.info(f"已停止图谱记忆更新器: simulation_id={simulation_id}")
+            if on_complete:
+                try:
+                    on_complete('complete')
+                except Exception as callback_error:
+                    logger.error(f"摄取完成回调失败: {callback_error}")
+            return status
+
+        def _deregister(finished_updater, final_status):
+            with cls._lock:
+                if cls._updaters.get(simulation_id) is finished_updater:
+                    cls._updaters.pop(simulation_id, None)
+            logger.info(
+                f"Zep后台摄取结束({final_status})，已移除更新器: "
+                f"simulation_id={simulation_id}"
+            )
+            if on_complete:
+                on_complete(final_status)
+
+        updater.finalize_in_background(on_complete=_deregister)
+        return updater.ingestion_status
+
+    @classmethod
+    def get_ingestion_status(cls, simulation_id: str) -> Optional[Dict[str, Any]]:
+        """Ingestion lifecycle of a registered updater, or None if absent."""
+        with cls._lock:
+            updater = cls._updaters.get(simulation_id)
+        if updater is None:
+            return None
+        return updater.ingestion_status
     
     # 防止 stop_all 重复调用的标志
     _stop_all_done = False

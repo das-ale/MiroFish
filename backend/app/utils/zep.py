@@ -25,7 +25,17 @@ ZEP_CLOUD_BASE_URL = "https://api.getzep.com/api/v2"
 ZEP_HTTP_REQUEST_TIMEOUT_SECONDS = 60.0
 # Zep ingestion is asynchronous and may take several minutes. Preserve the
 # original GraphBuilder deadline while keeping it separate from HTTP timeout.
-ZEP_INGESTION_WAIT_TIMEOUT_SECONDS = 600
+# Deployment-tunable: free-tier Zep accounts can need far longer than the
+# default under load (large simulations queue dozens of episodes).
+ZEP_INGESTION_WAIT_TIMEOUT_SECONDS = int(
+    os.environ.get("ZEP_INGESTION_WAIT_TIMEOUT_SECONDS", "600")
+)
+# Ceiling for the background (non-blocking) ingestion wait that runs after a
+# simulation reaches a terminal state. Generous by default: it no longer holds
+# up the stop flow or report generation.
+ZEP_INGESTION_BACKGROUND_TIMEOUT_SECONDS = int(
+    os.environ.get("ZEP_INGESTION_BACKGROUND_TIMEOUT_SECONDS", "3600")
+)
 MAX_ZEP_SEARCH_QUERY_CHARS = 400
 MAX_ZEP_SEARCH_RESULTS = 50
 

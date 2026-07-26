@@ -31,13 +31,15 @@ def test_manual_stop_surfaces_graph_ingestion_failure(monkeypatch):
         "_save_run_state",
         classmethod(lambda _cls, value: saved.append(value.runner_status)),
     )
+    # Data actually lost during the drain (stuck worker / failed batch send)
+    # must still surface as FAILED — slow Cloud processing must not.
     monkeypatch.setattr(
         runner_module.ZepGraphMemoryManager,
-        "stop_updater",
+        "finalize_updater_background",
         classmethod(
-            lambda _cls, _simulation_id: (_ for _ in ()).throw(
-                RuntimeError("ingestion incomplete")
-            )
+            lambda _cls, _simulation_id, on_complete=None: (
+                _ for _ in ()
+            ).throw(RuntimeError("ingestion incomplete"))
         ),
     )
     SimulationRunner._processes.pop("sim-1", None)
@@ -49,10 +51,58 @@ def test_manual_stop_surfaces_graph_ingestion_failure(monkeypatch):
 
         assert state.runner_status == RunnerStatus.FAILED
         assert "ingestion incomplete" in state.error
+        assert state.zep_ingestion_status == 'failed'
         assert saved[-1] == RunnerStatus.FAILED
     finally:
         SimulationRunner._graph_memory_enabled.pop("sim-1", None)
         SimulationRunner._manual_stop_requests.discard("sim-1")
+
+
+def test_manual_stop_reaches_terminal_state_with_pending_cloud_processing(
+    monkeypatch,
+):
+    """Slow Zep Cloud processing no longer blocks or fails the stop flow."""
+    state = SimulationRunState(
+        simulation_id="sim-bg",
+        runner_status=RunnerStatus.RUNNING,
+    )
+    saved = []
+    monkeypatch.setattr(
+        SimulationRunner,
+        "get_run_state",
+        classmethod(lambda _cls, _simulation_id: state),
+    )
+    monkeypatch.setattr(
+        SimulationRunner,
+        "_save_run_state",
+        classmethod(lambda _cls, value: saved.append(value.runner_status)),
+    )
+    monkeypatch.setattr(
+        runner_module.ZepGraphMemoryManager,
+        "finalize_updater_background",
+        classmethod(
+            lambda _cls, _simulation_id, on_complete=None: {
+                "state": "awaiting_processing",
+                "pending_episodes": 48,
+                "error": None,
+            }
+        ),
+    )
+    SimulationRunner._processes.pop("sim-bg", None)
+    SimulationRunner._graph_memory_enabled["sim-bg"] = True
+    SimulationRunner._monitor_threads.pop("sim-bg", None)
+
+    try:
+        result = SimulationRunner.stop_simulation("sim-bg")
+
+        assert result.runner_status == RunnerStatus.STOPPED
+        assert result.error is None
+        assert result.zep_ingestion_status == 'processing'
+        assert result.zep_ingestion_pending == 48
+        assert saved[-1] == RunnerStatus.STOPPED
+    finally:
+        SimulationRunner._graph_memory_enabled.pop("sim-bg", None)
+        SimulationRunner._manual_stop_requests.discard("sim-bg")
 
 
 def test_platform_completion_does_not_publish_terminal_success_before_barrier(
@@ -419,6 +469,7 @@ def test_shutdown_terminates_producer_before_tail_read_and_updater_drain(
         assert state.runner_status == RunnerStatus.STOPPED
     finally:
         SimulationRunner._cleanup_done = False
+        SimulationRunner._shutdown_in_progress = False
         SimulationRunner._processes.pop(simulation_id, None)
         SimulationRunner._monitor_threads.pop(simulation_id, None)
         SimulationRunner._graph_memory_enabled.pop(simulation_id, None)
@@ -480,5 +531,6 @@ def test_shutdown_drain_failure_remains_failed_and_retryable(monkeypatch):
         assert SimulationRunner._cleanup_done is False
     finally:
         SimulationRunner._cleanup_done = False
+        SimulationRunner._shutdown_in_progress = False
         SimulationRunner._graph_memory_enabled.pop(simulation_id, None)
         SimulationRunner._manual_stop_requests.discard(simulation_id)

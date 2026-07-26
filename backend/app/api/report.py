@@ -82,14 +82,22 @@ def generate_report():
             }), 404
 
         run_state = SimulationRunner.get_run_state(simulation_id)
-        updater = ZepGraphMemoryManager.get_updater(simulation_id)
+        ingestion = ZepGraphMemoryManager.get_ingestion_status(simulation_id)
         active_statuses = {
             RunnerStatus.STARTING,
             RunnerStatus.RUNNING,
             RunnerStatus.PAUSED,
             RunnerStatus.STOPPING,
         }
-        if updater is not None or (
+        # Block only while the simulation itself (or the bounded drain) is
+        # active. Background Cloud processing of already-sent episodes no
+        # longer blocks report generation: the report reads the local
+        # simulation databases plus whatever Zep has ingested so far.
+        drain_active = ingestion is not None and ingestion.get("state") in (
+            'active',
+            'draining',
+        )
+        if drain_active or (
             run_state is not None and run_state.runner_status in active_statuses
         ):
             return jsonify({
@@ -98,8 +106,21 @@ def generate_report():
                     "Simulation or Zep graph ingestion is still active; "
                     "wait for a terminal run status before generating a report"
                 ),
-                "ingestion_pending": updater is not None,
+                "ingestion_pending": drain_active,
             }), 409
+
+        ingestion_warning = None
+        if ingestion is not None and ingestion.get("state") == 'awaiting_processing':
+            pending = ingestion.get("pending_episodes", 0)
+            ingestion_warning = (
+                f"Zep is still processing {pending} episode(s) in the "
+                "background; graph searches may not include the latest "
+                "simulation facts yet"
+            )
+            logger.warning(
+                f"生成报告时Zep后台摄取仍在进行: simulation_id={simulation_id}, "
+                f"pending={pending}"
+            )
         successful_terminal_statuses = {
             RunnerStatus.COMPLETED,
             RunnerStatus.STOPPED,
@@ -306,7 +327,8 @@ def generate_report():
                 "task_id": task_id,
                 "status": "generating",
                 "message": t('api.reportGenerateStarted'),
-                "already_generated": False
+                "already_generated": False,
+                "ingestion_warning": ingestion_warning,
             }
         })
         
