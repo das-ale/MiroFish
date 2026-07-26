@@ -9,9 +9,10 @@ OASIS Agent Profile生成器
 """
 
 import json
+import os
 import random
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -892,6 +893,143 @@ class OasisProfileGenerator:
         """设置图谱ID用于Zep检索"""
         self.graph_id = graph_id
     
+    def classify_actor_entities(
+        self,
+        entities: List[EntityNode],
+        simulation_requirement: str = "",
+    ) -> Tuple[List[EntityNode], List[Dict[str, Any]]]:
+        """Filtra entidades que NO deben convertirse en agentes sociales.
+
+        El grafo extrae de los documentos entidades que no son actores
+        plausibles de la conversación (plataformas como LinkedIn/Google,
+        herramientas, personas famosas citadas solo como referencia, marcas
+        del propio sujeto actuando como terceros, conceptos abstractos).
+        Convertirlas en agentes produce conversaciones absurdas.
+
+        Conservador y fail-open: ante duda se mantiene la entidad; si el LLM
+        falla, no se filtra nada. Desactivable con PROFILE_ENTITY_FILTER=0.
+
+        Returns:
+            (entidades_actor, exclusiones) — exclusiones es una lista de
+            {name, entity_type, reason, why} para logging/UI.
+        """
+        if os.environ.get("PROFILE_ENTITY_FILTER", "1").lower() in (
+            "0", "false", "no"
+        ):
+            return entities, []
+        if not entities:
+            return entities, []
+
+        roster = []
+        for e in entities:
+            roster.append({
+                "name": e.name,
+                "type": e.get_entity_type() or "Entity",
+                "summary": (e.summary or "")[:300],
+            })
+
+        system_prompt = (
+            "You curate the agent roster for a social-media simulation. "
+            "Each entity below was extracted from source documents and is "
+            "about to become an autonomous agent that posts and comments as "
+            "an independent voice in the simulated public conversation.\n\n"
+            "Identify ONLY the entities that clearly must NOT become such an "
+            "agent:\n"
+            "- platform_or_tool: digital platforms, software products or "
+            "tools (e.g. LinkedIn, Google, WhatsApp, an SEO tool). The "
+            "simulation runs ON platforms; platforms are not participants. "
+            "IMPORTANT: a NAMED community that lives on a platform (e.g. a "
+            "specific Facebook group of local business owners) is a "
+            "participant community, NOT a platform — keep it. Only the "
+            "platform/product itself is excluded.\n"
+            "- referenced_person: real-world famous people or media that the "
+            "documents mention only as references someone follows or cites "
+            "(e.g. a global influencer named in 'follows X'), NOT scenario "
+            "participants.\n"
+            "- abstract_concept: processes, topics, places or concepts that "
+            "cannot speak (e.g. 'inflation', 'a marketing campaign', a "
+            "region name). IMPORTANT: audience segments and archetypes that "
+            "represent groups of people (e.g. 'clients', 'freelancers', "
+            "'premium professionals', 'restaurant owners', 'clinic chains') "
+            "are GROUP ACTORS whose collective voice matters in the "
+            "conversation — keep them.\n\n"
+            "KEEP everything else: people (real or fictional) who plausibly "
+            "act in the scenario, businesses, competitors, associations, "
+            "community groups, local media outlets, and the subject "
+            "organization itself. When unsure, KEEP the entity (do not list "
+            "it).\n\n"
+            "Respond with JSON only: {\"exclusions\": [{\"name\": \"<exact "
+            "entity name>\", \"reason\": \"platform_or_tool|"
+            "referenced_person|abstract_concept\", \"why\": \"<short "
+            "justification>\"}]}. If nothing must be excluded, return "
+            "{\"exclusions\": []}."
+        )
+        user_prompt = (
+            f"Simulation requirement:\n{simulation_requirement[:800]}\n\n"
+            f"Candidate entities ({len(roster)}):\n"
+            f"{json.dumps(roster, ensure_ascii=False, indent=1)}"
+        )
+
+        try:
+            from ..utils.llm_client import LLMClient
+            llm = LLMClient(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                model=self.model_name,
+            )
+            response = llm.chat_json(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.1,
+            )
+            raw_exclusions = response.get("exclusions", []) or []
+        except Exception as error:
+            logger.warning(
+                f"实体过滤LLM调用失败，保留全部实体（fail-open）: {error}"
+            )
+            return entities, []
+
+        valid_reasons = {
+            "platform_or_tool", "referenced_person", "abstract_concept"
+        }
+        by_name = {e.name: e for e in entities}
+        exclusions: List[Dict[str, Any]] = []
+        excluded_names = set()
+        for item in raw_exclusions:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            reason = item.get("reason")
+            if name not in by_name or reason not in valid_reasons:
+                continue  # nunca excluir nombres no solicitados o razones raras
+            excluded_names.add(name)
+            entity = by_name[name]
+            exclusions.append({
+                "name": name,
+                "entity_type": entity.get_entity_type() or "Entity",
+                "reason": reason,
+                "why": str(item.get("why", ""))[:200],
+            })
+
+        # Cinturón de seguridad: nunca excluir más de la mitad del reparto —
+        # una respuesta desbocada del LLM no puede vaciar la simulación.
+        if len(excluded_names) > len(entities) // 2:
+            logger.warning(
+                f"实体过滤排除过多({len(excluded_names)}/{len(entities)})，"
+                "忽略过滤结果（fail-open）"
+            )
+            return entities, []
+
+        kept = [e for e in entities if e.name not in excluded_names]
+        for exc in exclusions:
+            logger.info(
+                f"实体过滤: 排除 '{exc['name']}' ({exc['reason']}): "
+                f"{exc['why']}"
+            )
+        return kept, exclusions
+
     def generate_profiles_from_entities(
         self,
         entities: List[EntityNode],

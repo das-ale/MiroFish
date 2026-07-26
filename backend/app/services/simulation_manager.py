@@ -354,8 +354,34 @@ class SimulationManager:
                 realtime_output_path = os.path.join(sim_dir, "twitter_profiles.csv")
                 realtime_platform = "twitter"
             
+            # 过滤非行动者实体（平台/工具、仅被引用的名人、抽象概念）。
+            # 保守 + fail-open；PROFILE_ENTITY_FILTER=0 可关闭。
+            actor_entities, excluded_entities = (
+                generator.classify_actor_entities(
+                    filtered.entities,
+                    simulation_requirement=simulation_requirement,
+                )
+            )
+            if excluded_entities:
+                excluded_path = os.path.join(sim_dir, "excluded_entities.json")
+                try:
+                    with open(excluded_path, 'w', encoding='utf-8') as f:
+                        json.dump(
+                            excluded_entities, f, ensure_ascii=False, indent=2
+                        )
+                except Exception as save_error:
+                    logger.warning(f"保存排除实体列表失败: {save_error}")
+                logger.info(
+                    f"实体过滤: {len(filtered.entities)} -> "
+                    f"{len(actor_entities)} 个行动者实体 "
+                    f"(排除 {len(excluded_entities)} 个)"
+                )
+                state.entities_count = len(actor_entities)
+                total_entities = len(actor_entities)
+                self._save_simulation_state(state)
+
             profiles = generator.generate_profiles_from_entities(
-                entities=filtered.entities,
+                entities=actor_entities,
                 use_llm=use_llm_for_profiles,
                 progress_callback=profile_progress,
                 graph_id=state.graph_id,  # 传入graph_id用于Zep检索

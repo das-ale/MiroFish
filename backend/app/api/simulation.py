@@ -3,6 +3,7 @@
 Step2: Zep实体读取与过滤、OASIS模拟准备与运行（全程自动化）
 """
 
+import json
 import os
 import traceback
 from contextlib import nullcontext
@@ -801,10 +802,21 @@ def get_simulation(simulation_id: str):
             }), 404
         
         result = state.to_dict()
-        
+
         # 如果模拟已准备好，附加运行说明
         if state.status == SimulationStatus.READY:
             result["run_instructions"] = manager.get_run_instructions(simulation_id)
+
+        # 附加被实体过滤器排除的实体（如有），便于用户审查
+        excluded_path = os.path.join(
+            manager._get_simulation_dir(simulation_id), "excluded_entities.json"
+        )
+        if os.path.exists(excluded_path):
+            try:
+                with open(excluded_path, 'r', encoding='utf-8') as f:
+                    result["excluded_entities"] = json.load(f)
+            except Exception:
+                pass
         
         return jsonify({
             "success": True,
