@@ -378,6 +378,37 @@ class SimulationRunner:
     # 关机期间强制阻塞式drain：进程退出后没有任何线程能完成后台等待
     _shutdown_in_progress = False
 
+    @staticmethod
+    def _auto_stop_enabled() -> bool:
+        """Close the command-wait env automatically once all rounds finish.
+
+        Default ON: the report flow requires a terminal state anyway, and the
+        interview feature needs the env before the report exists — which the
+        current report barrier makes unreachable. Set
+        AUTO_STOP_AFTER_COMPLETION=0 to keep the env alive for manual IPC use.
+        """
+        return os.environ.get(
+            "AUTO_STOP_AFTER_COMPLETION", "1"
+        ).lower() not in ("0", "false", "no")
+
+    @staticmethod
+    def _all_enabled_platforms_completed(
+        state: "SimulationRunState",
+        twitter_actions_log: str,
+        reddit_actions_log: str,
+    ) -> bool:
+        """True when every platform that is actually running has finished.
+
+        A platform counts as enabled iff its actions log exists (created at
+        platform startup); completion comes from the simulation_end event.
+        """
+        completed = []
+        if os.path.exists(twitter_actions_log):
+            completed.append(state.twitter_completed)
+        if os.path.exists(reddit_actions_log):
+            completed.append(state.reddit_completed)
+        return bool(completed) and all(completed)
+
     @classmethod
     def _zep_blocking_mode(cls) -> bool:
         """Blocking ingestion wait: legacy env escape hatch, forced at shutdown."""
@@ -678,6 +709,7 @@ class SimulationRunner:
         
         monitor_error: Exception | None = None
         exit_code: int | None = None
+        auto_close_requested_at: float | None = None
         try:
             while process.poll() is None:  # 进程仍在运行
                 # 读取 Twitter 动作日志
@@ -685,13 +717,51 @@ class SimulationRunner:
                     twitter_position = cls._read_action_log(
                         twitter_actions_log, twitter_position, state, "twitter"
                     )
-                
+
                 # 读取 Reddit 动作日志
                 if os.path.exists(reddit_actions_log):
                     reddit_position = cls._read_action_log(
                         reddit_actions_log, reddit_position, state, "reddit"
                     )
-                
+
+                # 自动收尾：所有启用平台的模拟循环都已结束时，主动关闭
+                # 等待命令模式的环境，让模拟自然进入 COMPLETED 终态。
+                # （不设置 manual_stop 标记，因此走"自然完成"路径）
+                if (
+                    auto_close_requested_at is None
+                    and cls._auto_stop_enabled()
+                    and cls._all_enabled_platforms_completed(
+                        state, twitter_actions_log, reddit_actions_log
+                    )
+                ):
+                    logger.info(
+                        "所有平台模拟循环已完成，自动关闭环境: %s",
+                        simulation_id,
+                    )
+                    auto_close_requested_at = time.time()
+                    try:
+                        SimulationIPCClient(sim_dir).send_close_env(timeout=15.0)
+                    except Exception as close_error:
+                        logger.warning(
+                            f"close_env 命令失败，将在宽限期后强制终止: "
+                            f"{close_error}"
+                        )
+                elif (
+                    auto_close_requested_at is not None
+                    and time.time() - auto_close_requested_at > 30
+                    and process.poll() is None
+                ):
+                    # 环境未响应 close_env：兜底强制终止
+                    logger.warning(
+                        "环境未在宽限期内退出，强制终止进程: %s",
+                        simulation_id,
+                    )
+                    auto_close_requested_at = float('inf')
+                    try:
+                        cls._terminate_process(process, simulation_id)
+                    except Exception as term_error:
+                        logger.error(f"强制终止失败: {term_error}")
+
                 # 更新状态
                 cls._save_run_state(state)
                 time.sleep(2)

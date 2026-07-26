@@ -1699,20 +1699,35 @@ class ReportAgent:
                         t('progress.generatingSection', title=section.title, current=section_num, total=total_sections)
                     )
                 
-                # 生成主章节内容
-                section_content = self._generate_section_react(
-                    section=section,
-                    outline=outline,
-                    previous_sections=generated_sections,
-                    progress_callback=lambda stage, prog, msg:
-                        progress_callback(
-                            stage, 
-                            base_progress + int(prog * 0.7 / total_sections),
-                            msg
-                        ) if progress_callback else None,
-                    section_index=section_num
-                )
-                
+                # 生成主章节内容（空内容自动重试一次：偶发的空章节
+                # 此前会静默进入最终报告）
+                section_content = ""
+                for attempt in range(2):
+                    section_content = self._generate_section_react(
+                        section=section,
+                        outline=outline,
+                        previous_sections=generated_sections,
+                        progress_callback=lambda stage, prog, msg:
+                            progress_callback(
+                                stage,
+                                base_progress + int(prog * 0.7 / total_sections),
+                                msg
+                            ) if progress_callback else None,
+                        section_index=section_num
+                    )
+                    if section_content and section_content.strip():
+                        break
+                    logger.warning(
+                        f"章节内容为空，{'重试一次' if attempt == 0 else '重试后仍为空，跳过'}: "
+                        f"{section.title}"
+                    )
+                if not (section_content and section_content.strip()):
+                    # Visible placeholder instead of a silent empty section
+                    section_content = (
+                        "*(Section generation returned no content after a "
+                        "retry; see the agent log for details.)*"
+                    )
+
                 section.content = section_content
                 generated_sections.append(f"## {section.title}\n\n{section_content}")
 
