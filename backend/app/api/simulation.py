@@ -498,6 +498,13 @@ def prepare_simulation():
         entity_types_list = data.get('entity_types')
         use_llm_for_profiles = data.get('use_llm_for_profiles', True)
         parallel_profile_count = data.get('parallel_profile_count', 5)
+        # Modo escenario (P3): evento inyectado solo en config + población
+        # copiada de otro sim del mismo proyecto
+        scenario_event = data.get('scenario_event')
+        profiles_from_simulation = data.get('profiles_from_simulation')
+        requirement_override = data.get('simulation_requirement')
+        if requirement_override:
+            simulation_requirement = requirement_override
         
         # ========== 同步获取实体数量（在后台任务启动前） ==========
         # 这样前端在调用prepare后立即就能获取到预期Agent总数
@@ -618,7 +625,9 @@ def prepare_simulation():
                     defined_entity_types=entity_types_list,
                     use_llm_for_profiles=use_llm_for_profiles,
                     progress_callback=progress_callback,
-                    parallel_profile_count=parallel_profile_count
+                    parallel_profile_count=parallel_profile_count,
+                    scenario_event=scenario_event,
+                    profiles_from_simulation=profiles_from_simulation
                 )
 
                 if result_state.status == SimulationStatus.FAILED:

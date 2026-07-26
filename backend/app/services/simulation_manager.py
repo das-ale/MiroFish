@@ -249,7 +249,9 @@ class SimulationManager:
         defined_entity_types: Optional[List[str]] = None,
         use_llm_for_profiles: bool = True,
         progress_callback: Optional[callable] = None,
-        parallel_profile_count: int = 3
+        parallel_profile_count: int = 3,
+        scenario_event: Optional[str] = None,
+        profiles_from_simulation: Optional[str] = None,
     ) -> SimulationState:
         """
         准备模拟环境（全程自动化）
@@ -286,7 +288,17 @@ class SimulationManager:
             self._save_simulation_state(state)
             
             sim_dir = self._get_simulation_dir(simulation_id)
-            
+
+            # Escenario: el evento se inyecta SOLO en la config (posts
+            # iniciales/parámetros), nunca en el grafo — así N escenarios
+            # comparten mundo y población idénticos.
+            if scenario_event:
+                document_text = (
+                    f"{document_text}\n\n"
+                    f"## EVENTO DEL ESCENARIO (estímulo a simular)\n"
+                    f"{scenario_event}"
+                )
+
             # ========== 阶段1: 读取并过滤实体 ==========
             if progress_callback:
                 progress_callback("reading", 0, t('progress.connectingZepGraph'))
@@ -354,14 +366,39 @@ class SimulationManager:
                 realtime_output_path = os.path.join(sim_dir, "twitter_profiles.csv")
                 realtime_platform = "twitter"
             
-            # 过滤非行动者实体（平台/工具、仅被引用的名人、抽象概念）。
-            # 保守 + fail-open；PROFILE_ENTITY_FILTER=0 可关闭。
-            actor_entities, excluded_entities = (
-                generator.classify_actor_entities(
-                    filtered.entities,
-                    simulation_requirement=simulation_requirement,
+            if profiles_from_simulation:
+                # Modo escenario: población COPIADA del sim origen — misma
+                # gente, solo cambia el estímulo. Sin filtrado ni generación.
+                source_dir = self._get_simulation_dir(profiles_from_simulation)
+                copied_names = set()
+                for fname in (
+                    "reddit_profiles.json", "twitter_profiles.csv",
+                    "profiles_provenance.json", "excluded_entities.json",
+                ):
+                    src = os.path.join(source_dir, fname)
+                    if os.path.exists(src):
+                        shutil.copy2(src, os.path.join(sim_dir, fname))
+                rp = os.path.join(sim_dir, "reddit_profiles.json")
+                if os.path.exists(rp):
+                    with open(rp, 'r', encoding='utf-8') as f:
+                        copied_names = {p.get("name") for p in json.load(f)}
+                actor_entities = [
+                    e for e in filtered.entities if e.name in copied_names
+                ]
+                excluded_entities = []
+                logger.info(
+                    f"Población copiada de {profiles_from_simulation}: "
+                    f"{len(copied_names)} perfiles"
                 )
-            )
+            else:
+                # 过滤非行动者实体（平台/工具、仅被引用的名人、抽象概念）。
+                # 保守 + fail-open；PROFILE_ENTITY_FILTER=0 可关闭。
+                actor_entities, excluded_entities = (
+                    generator.classify_actor_entities(
+                        filtered.entities,
+                        simulation_requirement=simulation_requirement,
+                    )
+                )
             if excluded_entities:
                 excluded_path = os.path.join(sim_dir, "excluded_entities.json")
                 try:
@@ -380,37 +417,46 @@ class SimulationManager:
                 total_entities = len(actor_entities)
                 self._save_simulation_state(state)
 
-            profiles = generator.generate_profiles_from_entities(
-                entities=actor_entities,
-                use_llm=use_llm_for_profiles,
-                progress_callback=profile_progress,
-                graph_id=state.graph_id,  # 传入graph_id用于Zep检索
-                parallel_count=parallel_profile_count,  # 并行生成数量
-                realtime_output_path=realtime_output_path,  # 实时保存路径
-                output_platform=realtime_platform  # 输出格式
-            )
-            
-            state.profiles_count = len(profiles)
-            state.profiles_generated = len(profiles) > 0
+            if profiles_from_simulation:
+                profiles = []  # ya copiados a disco; no se regeneran
+            else:
+                profiles = generator.generate_profiles_from_entities(
+                    entities=actor_entities,
+                    use_llm=use_llm_for_profiles,
+                    progress_callback=profile_progress,
+                    graph_id=state.graph_id,
+                    parallel_count=parallel_profile_count,
+                    realtime_output_path=realtime_output_path,
+                    output_platform=realtime_platform,
+                )
+
+            if profiles_from_simulation:
+                state.profiles_count = len(actor_entities)
+                state.profiles_generated = True
+            else:
+                state.profiles_count = len(profiles)
+                state.profiles_generated = len(profiles) > 0
             self._save_simulation_state(state)
 
             # Sidecar de溯源 por perfil (los formatos OASIS no lo admiten)
+            # (en modo escenario los archivos ya vienen copiados del origen)
             try:
-                provenance_payload = [
-                    {
-                        "user_id": p.user_id,
-                        "name": p.name,
-                        "provenance": p.provenance,
-                    }
-                    for p in profiles
-                ]
-                with open(
-                    os.path.join(sim_dir, "profiles_provenance.json"),
-                    'w', encoding='utf-8',
-                ) as f:
-                    json.dump(
-                        provenance_payload, f, ensure_ascii=False, indent=2
-                    )
+                if not profiles_from_simulation:
+                    provenance_payload = [
+                        {
+                            "user_id": p.user_id,
+                            "name": p.name,
+                            "provenance": p.provenance,
+                        }
+                        for p in profiles
+                    ]
+                    with open(
+                        os.path.join(sim_dir, "profiles_provenance.json"),
+                        'w', encoding='utf-8',
+                    ) as f:
+                        json.dump(
+                            provenance_payload, f, ensure_ascii=False, indent=2
+                        )
             except Exception as prov_error:
                 logger.warning(f"保存溯源sidecar失败: {prov_error}")
             
@@ -424,14 +470,14 @@ class SimulationManager:
                     total=total_entities
                 )
             
-            if state.enable_reddit:
+            if state.enable_reddit and not profiles_from_simulation:
                 generator.save_profiles(
                     profiles=profiles,
                     file_path=os.path.join(sim_dir, "reddit_profiles.json"),
                     platform="reddit"
                 )
-            
-            if state.enable_twitter:
+
+            if state.enable_twitter and not profiles_from_simulation:
                 # Twitter使用CSV格式！这是OASIS的要求
                 generator.save_profiles(
                     profiles=profiles,
