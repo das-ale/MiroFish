@@ -3,6 +3,7 @@ Report API路由
 提供模拟报告生成、获取、对话等接口
 """
 
+import json
 import os
 import traceback
 import threading
@@ -28,6 +29,50 @@ logger = get_logger('mirofish.api.report')
 
 
 # ============== 报告生成接口 ==============
+
+@report_bp.route('/compare', methods=['POST'])
+def compare_scenarios_endpoint():
+    """Comparativa de escenarios: N sims terminadas -> informe comparativo."""
+    try:
+        from ..services.scenario_comparator import compare_scenarios
+        data = request.get_json() or {}
+        simulation_ids = data.get('simulation_ids')
+        if not isinstance(simulation_ids, list) or len(simulation_ids) < 2:
+            return jsonify({
+                "success": False,
+                "error": "Provide 'simulation_ids' (list of >= 2)",
+            }), 400
+        result = compare_scenarios(
+            simulation_ids, label=data.get('label')
+        )
+        return jsonify({"success": True, "data": result})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 409
+    except Exception as e:
+        logger.error(f"Comparativa falló: {str(e)}")
+        return jsonify({
+            "success": False, "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+
+@report_bp.route('/compare/<comparison_id>', methods=['GET'])
+def get_comparison(comparison_id: str):
+    try:
+        from ..services.scenario_comparator import COMPARISONS_DIR
+        out_dir = os.path.join(COMPARISONS_DIR, comparison_id)
+        meta_path = os.path.join(out_dir, 'meta.json')
+        md_path = os.path.join(out_dir, 'comparison.md')
+        if not os.path.exists(meta_path):
+            return jsonify({"success": False, "error": "not found"}), 404
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            meta = json.load(f)
+        with open(md_path, 'r', encoding='utf-8') as f:
+            meta['content'] = f.read()
+        return jsonify({"success": True, "data": meta})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @report_bp.route('/generate', methods=['POST'])
 def generate_report():
