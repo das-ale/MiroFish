@@ -915,7 +915,8 @@ class ReportAgent:
         simulation_id: str,
         simulation_requirement: str,
         llm_client: Optional[LLMClient] = None,
-        zep_tools: Optional[ZepToolsService] = None
+        zep_tools: Optional[ZepToolsService] = None,
+        extra_instructions: Optional[str] = None,
     ):
         """
         初始化Report Agent
@@ -930,7 +931,9 @@ class ReportAgent:
         self.graph_id = graph_id
         self.simulation_id = simulation_id
         self.simulation_requirement = simulation_requirement
-        
+        # Instrucciones del caso de uso (outline fijo + veredicto); None = libre
+        self.extra_instructions = extra_instructions
+
         self.llm = llm_client or LLMClient()
         self.zep_tools = zep_tools or ZepToolsService()
         
@@ -1225,6 +1228,12 @@ class ReportAgent:
             progress_callback("planning", 30, t('progress.generatingOutline'))
         
         system_prompt = f"{PLAN_SYSTEM_PROMPT}\n\n{FACT_ORIGIN_RULES}\n{get_language_instruction()}"
+        if self.extra_instructions:
+            # Caso de uso guiado: outline fijo con veredicto — prevalece
+            # sobre el diseño libre de secciones
+            system_prompt = (
+                f"{system_prompt}\n\n{self.extra_instructions}"
+            )
         user_prompt = PLAN_USER_PROMPT_TEMPLATE.format(
             simulation_requirement=self.simulation_requirement,
             total_nodes=context.get('graph_statistics', {}).get('total_nodes', 0),
@@ -1328,6 +1337,9 @@ class ReportAgent:
             tools_description=self._get_tools_description(),
         )
         system_prompt = f"{system_prompt}\n\n{FACT_ORIGIN_RULES}\n{get_language_instruction()}"
+        if self.extra_instructions:
+            system_prompt = f"{system_prompt}\n\n{self.extra_instructions}"
+
 
         # 构建用户prompt - 每个已完成章节各传入最大4000字
         if previous_sections:
@@ -1897,6 +1909,9 @@ class ReportAgent:
             tools_description=self._get_tools_description(),
         )
         system_prompt = f"{system_prompt}\n\n{FACT_ORIGIN_RULES}\n{get_language_instruction()}"
+        if self.extra_instructions:
+            system_prompt = f"{system_prompt}\n\n{self.extra_instructions}"
+
 
         # 构建消息
         messages = [{"role": "system", "content": system_prompt}]

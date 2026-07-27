@@ -48,6 +48,9 @@ class Project:
     
     # 配置
     simulation_requirement: Optional[str] = None
+    # Caso de uso guiado (producto-pregunta); None = flujo libre
+    use_case: Optional[str] = None
+    use_case_inputs: Optional[Dict[str, Any]] = None
     chunk_size: int = 500
     chunk_overlap: int = 50
     
@@ -71,6 +74,8 @@ class Project:
             "zep_batch_id": self.zep_batch_id,
             "zep_batch_operation_id": self.zep_batch_operation_id,
             "simulation_requirement": self.simulation_requirement,
+            "use_case": self.use_case,
+            "use_case_inputs": self.use_case_inputs,
             "chunk_size": self.chunk_size,
             "chunk_overlap": self.chunk_overlap,
             "error": self.error
@@ -98,6 +103,8 @@ class Project:
             zep_batch_id=data.get('zep_batch_id'),
             zep_batch_operation_id=data.get('zep_batch_operation_id'),
             simulation_requirement=data.get('simulation_requirement'),
+            use_case=data.get('use_case'),
+            use_case_inputs=data.get('use_case_inputs'),
             chunk_size=data.get('chunk_size', 500),
             chunk_overlap=data.get('chunk_overlap', 50),
             error=data.get('error')

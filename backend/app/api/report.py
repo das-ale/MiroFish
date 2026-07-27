@@ -378,10 +378,14 @@ def generate_report():
                         message=t('api.initReportAgent')
                     )
 
+                    from ..use_cases import get_report_instructions
                     agent = ReportAgent(
                         graph_id=graph_id,
                         simulation_id=simulation_id,
-                        simulation_requirement=simulation_requirement
+                        simulation_requirement=simulation_requirement,
+                        extra_instructions=get_report_instructions(
+                            getattr(project, 'use_case', None)
+                        ),
                     )
 
                     def progress_callback(stage, progress, message):

@@ -3,6 +3,7 @@
 采用项目上下文机制，服务端持久化状态
 """
 
+import json
 import os
 import re
 import traceback
@@ -262,6 +263,13 @@ def _reset_project_impl(project_id: str):
 
 # ============== 接口1：上传文件并生成本体 ==============
 
+@graph_bp.route('/use-cases', methods=['GET'])
+def get_use_cases():
+    """Plantillas de caso de uso disponibles (para el wizard)."""
+    from ..use_cases import list_use_cases
+    return jsonify({"success": True, "data": {"use_cases": list_use_cases()}})
+
+
 @graph_bp.route('/ontology/generate', methods=['POST'])
 def generate_ontology():
     """
@@ -298,6 +306,29 @@ def generate_ontology():
         simulation_requirement = request.form.get('simulation_requirement', '')
         project_name = request.form.get('project_name', 'Unnamed Project')
         additional_context = request.form.get('additional_context', '')
+
+        # Caso de uso guiado (producto-pregunta): renderiza el requirement
+        # desde la plantilla + inputs del formulario del wizard
+        use_case_id = request.form.get('use_case') or None
+        use_case_inputs = None
+        if use_case_id:
+            from ..use_cases import get_use_case, render_requirement
+            if get_use_case(use_case_id) is None:
+                return jsonify({
+                    "success": False,
+                    "error": f"Unknown use_case: {use_case_id}",
+                }), 400
+            raw_inputs = request.form.get('use_case_inputs', '')
+            try:
+                use_case_inputs = json.loads(raw_inputs) if raw_inputs else {}
+            except ValueError:
+                return jsonify({
+                    "success": False,
+                    "error": "use_case_inputs must be JSON",
+                }), 400
+            simulation_requirement = render_requirement(
+                use_case_id, use_case_inputs
+            )
         
         logger.debug(f"项目名称: {project_name}")
         logger.debug(f"模拟需求: {simulation_requirement[:100]}...")
@@ -319,6 +350,8 @@ def generate_ontology():
         # 创建项目
         project = ProjectManager.create_project(name=project_name)
         project.simulation_requirement = simulation_requirement
+        project.use_case = use_case_id
+        project.use_case_inputs = use_case_inputs
         logger.info(f"创建项目: {project.project_id}")
         
         # 保存文件并提取文本
