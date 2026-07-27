@@ -64,3 +64,10 @@ export function getProject(projectId) {
     method: 'get'
   })
 }
+
+export function listUseCases() {
+  return request({
+    url: '/api/graph/use-cases',
+    method: 'get'
+  })
+}

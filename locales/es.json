@@ -69,7 +69,9 @@
     "promptPlaceholder": "// Describe en lenguaje natural qué quieres simular o predecir",
     "engineBadge": "Motor: MiroFish-V1.0",
     "startEngine": "Arrancar motor",
-    "initializing": "Inicializando..."
+    "initializing": "Inicializando...",
+    "useCaseFree": "Modo libre",
+    "adTestNote": "Nota: se testea el mensaje, la oferta y el ángulo del anuncio a partir de la descripción del creativo — no el impacto visual real."
   },
   "main": {
     "layoutGraph": "Grafo",

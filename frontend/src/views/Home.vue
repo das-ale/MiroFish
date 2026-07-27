@@ -172,8 +172,13 @@
               <span>{{ $t('home.inputParams') }}</span>
             </div>
 
-            <!-- 输入区域 -->
+            <!-- Selector de producto-pregunta (casos de uso guiados) -->
             <div class="console-section">
+              <UseCaseWizard ref="wizardRef" v-model="useCaseModel" :disabled="loading" />
+            </div>
+
+            <!-- 输入区域 (modo libre) -->
+            <div class="console-section" v-if="!useCaseModel.useCase">
               <div class="console-header">
                 <span class="console-label">{{ $t('home.simulationPrompt') }}</span>
               </div>
@@ -220,6 +225,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
+import UseCaseWizard from '../components/UseCaseWizard.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 
 const router = useRouter()
@@ -231,6 +237,8 @@ const formData = ref({
 
 // 文件列表
 const files = ref([])
+const wizardRef = ref(null)
+const useCaseModel = ref({ useCase: null, inputs: {} })
 
 // 状态
 const loading = ref(false)
@@ -242,7 +250,11 @@ const fileInput = ref(null)
 
 // 计算属性:是否可以提交
 const canSubmit = computed(() => {
-  return formData.value.simulationRequirement.trim() !== '' && files.value.length > 0
+  if (files.value.length === 0) return false
+  if (useCaseModel.value.useCase) {
+    return wizardRef.value ? wizardRef.value.isValid() : false
+  }
+  return formData.value.simulationRequirement.trim() !== ''
 })
 
 // 触发文件选择
@@ -305,7 +317,12 @@ const startSimulation = () => {
   
   // 存储待上传的数据
   import('../store/pendingUpload.js').then(({ setPendingUpload }) => {
-    setPendingUpload(files.value, formData.value.simulationRequirement)
+    setPendingUpload(
+      files.value,
+      useCaseModel.value.useCase ? '' : formData.value.simulationRequirement,
+      useCaseModel.value.useCase,
+      useCaseModel.value.inputs
+    )
     
     // 立即跳转到Process页面（使用特殊标识表示新建项目）
     router.push({

@@ -69,7 +69,9 @@
     "promptPlaceholder": "// Describe your simulation or prediction requirement in natural language",
     "engineBadge": "Engine: MiroFish-V1.0",
     "startEngine": "Start Engine",
-    "initializing": "Initializing..."
+    "initializing": "Initializing...",
+    "useCaseFree": "Free mode",
+    "adTestNote": "Note: the ad message, offer and angle are tested from the creative description — not the real visual impact."
   },
   "main": {
     "layoutGraph": "Graph",

@@ -69,7 +69,9 @@
     "promptPlaceholder": "// 用自然语言输入模拟或预测需求（例.武大若发布撤销肖某处分的公告，会引发什么舆情走向）",
     "engineBadge": "引擎: MiroFish-V1.0",
     "startEngine": "启动引擎",
-    "initializing": "初始化中..."
+    "initializing": "初始化中...",
+    "useCaseFree": "自由模式",
+    "adTestNote": "注意：测试的是广告信息、优惠与角度（基于素材描述），而非真实视觉效果。"
   },
   "main": {
     "layoutGraph": "图谱",
