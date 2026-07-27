@@ -49,3 +49,19 @@ export const getReport = (reportId) => {
 export const chatWithReport = (data) => {
   return service.post('/api/report/chat', data)
 }
+
+export const listComparisons = () => {
+  return service.get('/api/report/comparisons')
+}
+
+export const getComparisonById = (comparisonId) => {
+  return service.get(`/api/report/compare/${comparisonId}`)
+}
+
+export const createComparison = (simulationIds, label) => {
+  return service.post('/api/report/compare', { simulation_ids: simulationIds, label })
+}
+
+export const createStability = (simulationIds, label) => {
+  return service.post('/api/report/stability', { simulation_ids: simulationIds, label })
+}

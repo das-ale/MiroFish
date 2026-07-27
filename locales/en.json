@@ -676,5 +676,20 @@
     "llmSelectAgentFailed": "LLM agent selection failed, using default selection: {error}",
     "generateInterviewQuestionsFailed": "Failed to generate interview questions: {error}",
     "generateInterviewSummaryFailed": "Failed to generate interview summary: {error}"
+  },
+  "experiments": {
+    "title": "Experiments",
+    "newAnalysis": "New analysis",
+    "selectSims": "Select ≥2 finished simulations",
+    "noSims": "No finished simulations",
+    "generating": "Generating… (1-2 min)",
+    "compareBtn": "Compare scenarios",
+    "stabilityBtn": "Stability",
+    "typeCompare": "Comparison",
+    "typeStability": "Stability",
+    "samePop": "same population",
+    "diffPop": "different populations",
+    "empty": "No analyses yet",
+    "selectOne": "Select an analysis from the list"
   }
 }

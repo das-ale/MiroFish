@@ -676,5 +676,20 @@
     "llmSelectAgentFailed": "LLM选择Agent失败，使用默认选择: {error}",
     "generateInterviewQuestionsFailed": "生成采访问题失败: {error}",
     "generateInterviewSummaryFailed": "生成采访摘要失败: {error}"
+  },
+  "experiments": {
+    "title": "实验",
+    "newAnalysis": "新建分析",
+    "selectSims": "选择≥2个已完成的模拟",
+    "noSims": "暂无已完成的模拟",
+    "generating": "生成中…（1-2分钟）",
+    "compareBtn": "对比场景",
+    "stabilityBtn": "稳定性",
+    "typeCompare": "对比",
+    "typeStability": "稳定性",
+    "samePop": "相同种群",
+    "diffPop": "不同种群",
+    "empty": "暂无分析",
+    "selectOne": "从列表中选择一个分析"
   }
 }

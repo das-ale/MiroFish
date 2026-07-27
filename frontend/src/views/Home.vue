@@ -207,6 +207,11 @@
 
       <!-- 历史项目数据库 -->
       <HistoryDatabase />
+
+      <!-- Experimentos: comparativas y estabilidad -->
+      <div class="experiments-link" @click="$router.push('/experiments')">
+        🧪 {{ $t('experiments.title') }} →
+      </div>
     </div>
   </div>
 </template>
@@ -950,4 +955,7 @@ html[lang="en"] .workflow-list .step-desc {
 html[lang="en"] .workflow-list {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
+
+.experiments-link { margin: 14px auto 0; max-width: 400px; text-align: center; padding: 10px; border: 1px solid rgba(74,125,255,0.35); border-radius: 10px; cursor: pointer; font-size: 14px; color: #4a7dff; }
+.experiments-link:hover { background: rgba(74,125,255,0.07); }
 </style>

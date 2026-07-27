@@ -676,5 +676,20 @@
     "llmSelectAgentFailed": "La selección de agentes por LLM falló, usando la selección predeterminada: {error}",
     "generateInterviewQuestionsFailed": "No se pudieron generar las preguntas de la entrevista: {error}",
     "generateInterviewSummaryFailed": "No se pudo generar el resumen de la entrevista: {error}"
+  },
+  "experiments": {
+    "title": "Experimentos",
+    "newAnalysis": "Nuevo análisis",
+    "selectSims": "Selecciona ≥2 simulaciones terminadas",
+    "noSims": "No hay simulaciones terminadas",
+    "generating": "Generando… (1-2 min)",
+    "compareBtn": "Comparar escenarios",
+    "stabilityBtn": "Estabilidad",
+    "typeCompare": "Comparativa",
+    "typeStability": "Estabilidad",
+    "samePop": "misma población",
+    "diffPop": "poblaciones distintas",
+    "empty": "Sin análisis todavía",
+    "selectOne": "Selecciona un análisis de la lista"
   }
 }

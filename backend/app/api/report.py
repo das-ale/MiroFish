@@ -56,6 +56,34 @@ def compare_scenarios_endpoint():
         }), 500
 
 
+@report_bp.route('/comparisons', methods=['GET'])
+def list_comparisons():
+    """Historial de comparativas y análisis de estabilidad.
+
+    Nota multi-tenant (fase SaaS): cuando exista auth, este listado se
+    filtrará por cuenta; el meta.json ya es autocontenido por comparación.
+    """
+    try:
+        from ..services.scenario_comparator import COMPARISONS_DIR
+        items = []
+        if os.path.exists(COMPARISONS_DIR):
+            for cid in os.listdir(COMPARISONS_DIR):
+                meta_path = os.path.join(COMPARISONS_DIR, cid, 'meta.json')
+                if not os.path.exists(meta_path):
+                    continue
+                try:
+                    with open(meta_path, 'r', encoding='utf-8') as f:
+                        meta = json.load(f)
+                    meta.pop('metrics', None)
+                    items.append(meta)
+                except Exception:
+                    continue
+        items.sort(key=lambda m: m.get('created_at', ''), reverse=True)
+        return jsonify({"success": True, "data": {"comparisons": items}})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @report_bp.route('/stability', methods=['POST'])
 def stability_endpoint():
     """K ejecuciones del mismo escenario -> clasificación de estabilidad."""
