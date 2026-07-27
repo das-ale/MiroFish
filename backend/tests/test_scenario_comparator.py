@@ -97,3 +97,37 @@ def test_compare_requires_two_sims(monkeypatch, tmp_path):
     _patch_dirs(monkeypatch, tmp_path)
     with pytest.raises(ValueError):
         sc.compare_scenarios(["solo-uno"])
+
+
+class _FakeLLMStb:
+    def __init__(self, *a, **k):
+        pass
+
+    def chat(self, *a, **k):
+        return "# Estabilidad\n| hallazgo | runs | clase |"
+
+
+def test_stability_same_scenario(monkeypatch, tmp_path):
+    _patch_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(sc, "LLMClient", _FakeLLMStb)
+    for sid in ("run-1", "run-2", "run-3"):
+        _make_sim(tmp_path, sid, event="mismo evento")
+        _make_report(tmp_path, sid)
+
+    result = sc.analyze_stability(["run-1", "run-2", "run-3"])
+    assert result["type"] == "stability"
+    assert result["same_scenario"] is True
+    assert result["same_population"] is True
+    assert result["content"].startswith("# Estabilidad")
+
+
+def test_stability_flags_different_stimuli(monkeypatch, tmp_path):
+    _patch_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(sc, "LLMClient", _FakeLLMStb)
+    _make_sim(tmp_path, "run-1", event="evento X")
+    _make_sim(tmp_path, "run-2", event="evento Y")
+    _make_report(tmp_path, "run-1")
+    _make_report(tmp_path, "run-2")
+
+    result = sc.analyze_stability(["run-1", "run-2"])
+    assert result["same_scenario"] is False

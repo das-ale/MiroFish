@@ -56,6 +56,30 @@ def compare_scenarios_endpoint():
         }), 500
 
 
+@report_bp.route('/stability', methods=['POST'])
+def stability_endpoint():
+    """K ejecuciones del mismo escenario -> clasificación de estabilidad."""
+    try:
+        from ..services.scenario_comparator import analyze_stability
+        data = request.get_json() or {}
+        simulation_ids = data.get('simulation_ids')
+        if not isinstance(simulation_ids, list) or len(simulation_ids) < 2:
+            return jsonify({
+                "success": False,
+                "error": "Provide 'simulation_ids' (list of >= 2)",
+            }), 400
+        result = analyze_stability(simulation_ids, label=data.get('label'))
+        return jsonify({"success": True, "data": result})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 409
+    except Exception as e:
+        logger.error(f"Análisis de estabilidad falló: {str(e)}")
+        return jsonify({
+            "success": False, "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+
 @report_bp.route('/compare/<comparison_id>', methods=['GET'])
 def get_comparison(comparison_id: str):
     try:
